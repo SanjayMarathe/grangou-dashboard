@@ -37,12 +37,13 @@ const colors = {
 
 // Grangou Logo Component (X with fork and knife)
 const GrangouLogo = ({ size = 32 }) => (
-  <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="40" height="40" rx="8" fill={colors.red} />
-    <path d="M12 12L28 28M28 12L12 28" stroke="white" strokeWidth="3" strokeLinecap="round" />
-    <circle cx="12" cy="12" r="2" fill="white" />
-    <circle cx="28" cy="12" r="2" fill="white" />
-  </svg>
+  <img
+    src="/image.png"
+    alt="Grangou"
+    width={size}
+    height={size}
+    style={{ borderRadius: size * 0.2 }}
+  />
 );
 
 // Loading Spinner Component
