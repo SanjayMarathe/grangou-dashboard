@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   DollarSign,
@@ -12,23 +12,16 @@ import {
   Heart,
   Utensils,
   BarChart3,
-  Settings,
   Bell,
   Search,
   RefreshCw,
   ExternalLink,
   Sparkles,
-  Calendar
+  LogOut,
+  Loader2
 } from 'lucide-react';
-import {
-  restaurantProfile,
-  impactMetrics,
-  recentExperiences,
-  flavorInsights,
-  trafficData,
-  gouSuggestions,
-  matchTypeBreakdown
-} from './mockData';
+import { AuthProvider, useAuth } from './AuthContext';
+import { dataAPI } from './api';
 import './index.css';
 
 // Brand Colors - Grangou Style Guide
@@ -52,95 +45,171 @@ const GrangouLogo = ({ size = 32 }) => (
   </svg>
 );
 
-// Sidebar Component
-const Sidebar = () => (
-  <aside className="fixed left-0 top-0 h-screen w-64 bg-white border-r border-gray-200 flex flex-col z-50">
-    <div className="p-6 border-b border-gray-100">
-      <div className="flex items-center gap-3">
-        <GrangouLogo size={40} />
-        <div>
-          <h1 className="font-bold text-[#222222] text-lg">grangou</h1>
-          <p className="text-xs text-gray-500">Restaurant Portal</p>
+// Loading Spinner Component
+const LoadingSpinner = () => (
+  <div className="min-h-screen bg-[#F4F4F4] flex items-center justify-center">
+    <div className="text-center">
+      <GrangouLogo size={64} />
+      <div className="mt-4 flex items-center justify-center gap-2 text-gray-500">
+        <Loader2 className="animate-spin" size={20} />
+        <span>Loading dashboard...</span>
+      </div>
+    </div>
+  </div>
+);
+
+// Login Page Component
+const LoginPage = () => {
+  const { login } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    const result = await login(email, password);
+
+    if (!result.success) {
+      setError(result.error || 'Login failed');
+    }
+
+    setIsLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F4F4F4] flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <GrangouLogo size={64} />
+          </div>
+          <h1 className="text-2xl font-bold text-[#222222]">Welcome to Grangou</h1>
+          <p className="text-gray-500 mt-2">Sign in to your restaurant portal</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-[#222222] mb-2">
+              Email Address
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF3B3F] focus:border-transparent"
+              placeholder="restaurant@example.com"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[#222222] mb-2">
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF3B3F] focus:border-transparent"
+              placeholder="Enter your password"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full py-3 bg-[#FF3B3F] hover:bg-[#E63538] text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="animate-spin" size={20} />
+                Signing in...
+              </>
+            ) : (
+              'Sign In'
+            )}
+          </button>
+        </form>
+
+        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+          <p className="text-xs text-gray-500 font-medium mb-2">Test Accounts:</p>
+          <div className="space-y-1 text-xs text-gray-400">
+            <p><span className="text-gray-600">The Golden Fork:</span> goldenfork@grangou.com / golden123</p>
+            <p><span className="text-gray-600">Spice Garden:</span> spicegarden@grangou.com / spice123</p>
+            <p><span className="text-gray-600">Ocean Blue Bistro:</span> oceanblue@grangou.com / ocean123</p>
+          </div>
         </div>
       </div>
     </div>
-
-    <nav className="flex-1 p-4">
-      <div className="space-y-1">
-        <NavItem icon={<BarChart3 size={20} />} label="Dashboard" active />
-        <NavItem icon={<MessageSquare size={20} />} label="Reviews" badge={3} />
-        <NavItem icon={<Utensils size={20} />} label="Menu Insights" />
-        <NavItem icon={<Users size={20} />} label="Guest Analytics" />
-        <NavItem icon={<Calendar size={20} />} label="Reservations" />
-        <NavItem icon={<Settings size={20} />} label="Settings" />
-      </div>
-    </nav>
-
-    <div className="p-4 border-t border-gray-100">
-      <div className="bg-[#F4F4F4] rounded-lg p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-[#FF3B3F] rounded-full flex items-center justify-center text-white font-semibold text-sm">
-            GF
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-[#222222] truncate">{restaurantProfile.name}</p>
-            <p className="text-xs text-gray-500 truncate">{restaurantProfile.location}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </aside>
-);
-
-const NavItem = ({ icon, label, active, badge }) => (
-  <button
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
-      active
-        ? 'bg-[#FF3B3F] text-white'
-        : 'text-gray-600 hover:bg-[#F4F4F4] hover:text-[#222222]'
-    }`}
-  >
-    {icon}
-    <span className="font-medium text-sm">{label}</span>
-    {badge && (
-      <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${
-        active ? 'bg-white text-[#FF3B3F]' : 'bg-[#FF3B3F] text-white'
-      }`}>
-        {badge}
-      </span>
-    )}
-  </button>
-);
+  );
+};
 
 // Header Component
-const Header = () => (
-  <header className="flex items-center justify-between mb-8">
-    <div>
-      <h1 className="text-[32px] font-bold text-[#222222] mb-1">
-        Hey there, {restaurantProfile.name}! 👋
-      </h1>
-      <p className="text-gray-500 text-base">
-        Ready to see how your guests are matching and munching?
-      </p>
-    </div>
-    <div className="flex items-center gap-3">
-      <button className="p-2.5 bg-white rounded-lg text-gray-500 hover:text-[#222222] hover:shadow-md transition-all border border-gray-200">
-        <Search size={20} />
-      </button>
-      <button className="p-2.5 bg-white rounded-lg text-gray-500 hover:text-[#222222] hover:shadow-md transition-all border border-gray-200 relative">
-        <Bell size={20} />
-        <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FF3B3F] rounded-full border-2 border-white"></span>
-      </button>
-      <button className="flex items-center gap-2 px-5 py-2.5 bg-[#FF3B3F] hover:bg-[#E63538] rounded-lg text-white font-semibold text-sm transition-all shadow-sm hover:shadow-md">
-        <RefreshCw size={16} />
-        Sync Data
-      </button>
-    </div>
-  </header>
-);
+const Header = ({ restaurantProfile, onRefresh, isRefreshing }) => {
+  const { user, logout } = useAuth();
+
+  return (
+    <header className="mb-8">
+      <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+        <div className="flex items-center gap-3">
+          <GrangouLogo size={36} />
+          <div>
+            <h1 className="font-bold text-[#222222] text-lg">grangou</h1>
+            <p className="text-xs text-gray-500">Restaurant Portal</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="p-2.5 bg-white rounded-lg text-gray-500 hover:text-[#222222] hover:shadow-md transition-all border border-gray-200">
+            <Search size={20} />
+          </button>
+          <button className="p-2.5 bg-white rounded-lg text-gray-500 hover:text-[#222222] hover:shadow-md transition-all border border-gray-200 relative">
+            <Bell size={20} />
+            <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#FF3B3F] rounded-full border-2 border-white"></span>
+          </button>
+          <button
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#FF3B3F] hover:bg-[#E63538] rounded-lg text-white font-semibold text-sm transition-all shadow-sm hover:shadow-md disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+            {isRefreshing ? 'Syncing...' : 'Sync Data'}
+          </button>
+          <button
+            onClick={logout}
+            className="flex items-center gap-2 px-4 py-2.5 text-gray-600 hover:text-[#FF3B3F] hover:bg-[#FF3B3F]/10 rounded-lg transition-colors text-sm border border-gray-200"
+          >
+            <LogOut size={16} />
+            Sign Out
+          </button>
+        </div>
+      </div>
+      <div>
+        <h2 className="text-[32px] font-bold text-[#222222] mb-1">
+          Hey there, {user?.name || 'Restaurant'}!
+        </h2>
+        <p className="text-gray-500 text-base">
+          Ready to see how your guests are matching and munching?
+        </p>
+      </div>
+    </header>
+  );
+};
 
 // Impact Metrics Component
-const ImpactMetrics = () => {
+const ImpactMetrics = ({ impactMetrics }) => {
+  if (!impactMetrics) return null;
+
   const metrics = [
     {
       label: 'Total Grangou Guests',
@@ -207,8 +276,11 @@ const ImpactMetrics = () => {
 };
 
 // Gou Says AI Suggestion Component
-const GouSaysCard = () => {
+const GouSaysCard = ({ gouSuggestions }) => {
   const [currentSuggestion, setCurrentSuggestion] = useState(0);
+
+  if (!gouSuggestions || gouSuggestions.length === 0) return null;
+
   const suggestion = gouSuggestions[currentSuggestion];
 
   return (
@@ -233,7 +305,7 @@ const GouSaysCard = () => {
               onClick={() => setCurrentSuggestion((prev) => (prev + 1) % gouSuggestions.length)}
               className="px-5 py-2.5 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              Next Tip →
+              Next Tip
             </button>
           </div>
         </div>
@@ -243,8 +315,14 @@ const GouSaysCard = () => {
 };
 
 // Recent Experiences Component
-const RecentExperiences = () => {
-  const [experiences, setExperiences] = useState(recentExperiences);
+const RecentExperiences = ({ recentExperiences: initialExperiences }) => {
+  const [experiences, setExperiences] = useState([]);
+
+  useEffect(() => {
+    if (initialExperiences) {
+      setExperiences(initialExperiences);
+    }
+  }, [initialExperiences]);
 
   const handleAcknowledge = (id) => {
     setExperiences(
@@ -261,6 +339,8 @@ const RecentExperiences = () => {
       />
     ));
   };
+
+  if (!experiences || experiences.length === 0) return null;
 
   return (
     <div className="bg-white rounded-lg shadow-card overflow-hidden">
@@ -331,41 +411,59 @@ const RecentExperiences = () => {
 };
 
 // Flavor Insights Component
-const FlavorInsights = () => (
-  <div className="bg-white rounded-lg shadow-card p-6">
-    <div className="flex items-center justify-between mb-6">
-      <div>
-        <h2 className="text-[20px] font-bold text-[#222222] flex items-center gap-2">
-          <ChefHat size={20} className="text-[#FF3B3F]" />
-          Gou's Flavor Insights
-        </h2>
-        <p className="text-sm text-gray-500">What your Grangou guests love most</p>
+const FlavorInsights = ({ flavorInsights }) => {
+  if (!flavorInsights || flavorInsights.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-lg shadow-card p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-[20px] font-bold text-[#222222] flex items-center gap-2">
+            <ChefHat size={20} className="text-[#FF3B3F]" />
+            Gou's Flavor Insights
+          </h2>
+          <p className="text-sm text-gray-500">What your Grangou guests love most</p>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {flavorInsights.map((item, index) => (
+          <div key={index}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-[#222222] font-semibold">{item.item}</span>
+              <span className="text-sm text-gray-500">{item.orders} orders</span>
+            </div>
+            <div className="h-3 bg-[#F4F4F4] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-full transition-all duration-500"
+                style={{ width: `${item.percentage}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">{item.percentage}% of guests loved this</p>
+          </div>
+        ))}
       </div>
     </div>
-    <div className="space-y-4">
-      {flavorInsights.map((item, index) => (
-        <div key={index}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-[#222222] font-semibold">{item.item}</span>
-            <span className="text-sm text-gray-500">{item.orders} orders</span>
-          </div>
-          <div className="h-3 bg-[#F4F4F4] rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-full transition-all duration-500"
-              style={{ width: `${item.percentage}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-400 mt-1">{item.percentage}% of guests loved this</p>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 // Traffic Chart Component
-const TrafficChart = () => {
-  const maxVisitors = Math.max(...trafficData.map((d) => d.visitors));
+const TrafficChart = ({ trafficData }) => {
+  const [hoveredBar, setHoveredBar] = useState(null);
+
+  if (!trafficData || trafficData.length === 0) return null;
+
   const lastWeekData = trafficData.slice(-7);
+  const maxVisitors = Math.max(...lastWeekData.map((d) => d.visitors));
+  const minVisitors = Math.min(...lastWeekData.map((d) => d.visitors));
+  const totalVisitors = lastWeekData.reduce((sum, d) => sum + d.visitors, 0);
+  const avgVisitors = Math.round(totalVisitors / lastWeekData.length);
+
+  // Calculate growth percentage
+  const previousWeekData = trafficData.slice(-14, -7);
+  const previousTotal = previousWeekData.reduce((sum, d) => sum + d.visitors, 0);
+  const growthPercent = previousTotal > 0
+    ? Math.round(((totalVisitors - previousTotal) / previousTotal) * 100)
+    : 0;
 
   return (
     <div className="bg-white rounded-lg shadow-card p-6">
@@ -375,64 +473,151 @@ const TrafficChart = () => {
           <p className="text-sm text-gray-500">Guests matched to your spot (last 7 days)</p>
         </div>
         <div className="text-right">
-          <p className="text-[24px] font-bold text-[#222222]">
-            {lastWeekData.reduce((sum, d) => sum + d.visitors, 0)}
-          </p>
-          <p className="text-xs text-[#06D6A0] font-semibold flex items-center justify-end gap-1">
-            <TrendingUp size={12} />
-            +18% from last week
+          <p className="text-[28px] font-bold text-[#222222]">{totalVisitors}</p>
+          <p className={`text-xs font-semibold flex items-center justify-end gap-1 ${growthPercent >= 0 ? 'text-[#06D6A0]' : 'text-[#FF3B3F]'}`}>
+            {growthPercent >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {growthPercent >= 0 ? '+' : ''}{growthPercent}% from last week
           </p>
         </div>
       </div>
-      <div className="h-48 flex items-end gap-3">
-        {lastWeekData.map((day, index) => {
-          const height = (day.visitors / maxVisitors) * 100;
-          return (
-            <div key={index} className="flex-1 flex flex-col items-center gap-2">
-              <span className="text-xs text-gray-500 font-medium">{day.visitors}</span>
+
+      {/* Chart Container */}
+      <div className="relative">
+        {/* Y-axis labels */}
+        <div className="absolute left-0 top-0 bottom-8 w-8 flex flex-col justify-between text-xs text-gray-400">
+          <span>{maxVisitors}</span>
+          <span>{Math.round(maxVisitors / 2)}</span>
+          <span>0</span>
+        </div>
+
+        {/* Chart Area */}
+        <div className="ml-10">
+          {/* Grid lines */}
+          <div className="absolute left-10 right-0 top-0 h-[200px] flex flex-col justify-between pointer-events-none">
+            <div className="border-t border-gray-100 w-full"></div>
+            <div className="border-t border-gray-100 w-full"></div>
+            <div className="border-t border-gray-200 w-full"></div>
+          </div>
+
+          {/* Average line */}
+          <div
+            className="absolute left-10 right-0 border-t-2 border-dashed border-[#FFD166] pointer-events-none z-10"
+            style={{ top: `${200 - (avgVisitors / maxVisitors) * 200}px` }}
+          >
+            <span className="absolute right-0 -top-5 text-xs text-[#FFD166] font-medium bg-white px-1">
+              avg: {avgVisitors}
+            </span>
+          </div>
+
+          {/* Bars */}
+          <div className="h-[200px] flex items-end gap-2 relative">
+            {lastWeekData.map((day, index) => {
+              const height = (day.visitors / maxVisitors) * 100;
+              const isHovered = hoveredBar === index;
+
+              return (
+                <div
+                  key={index}
+                  className="flex-1 flex flex-col items-center gap-1 relative"
+                  onMouseEnter={() => setHoveredBar(index)}
+                  onMouseLeave={() => setHoveredBar(null)}
+                >
+                  {/* Tooltip */}
+                  {isHovered && (
+                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-[#222222] text-white text-xs py-1.5 px-3 rounded-lg shadow-lg z-20 whitespace-nowrap">
+                      <div className="font-semibold">{day.visitors} guests</div>
+                      <div className="text-gray-300">{day.date}</div>
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 rotate-45 w-2 h-2 bg-[#222222]"></div>
+                    </div>
+                  )}
+
+                  {/* Bar */}
+                  <div
+                    className={`w-full rounded-t-lg transition-all duration-300 cursor-pointer ${
+                      isHovered
+                        ? 'bg-gradient-to-t from-[#E63538] to-[#FF3B3F] scale-105'
+                        : 'bg-gradient-to-t from-[#FF3B3F] to-[#FF6B6F]'
+                    }`}
+                    style={{
+                      height: `${height}%`,
+                      minHeight: '4px',
+                      boxShadow: isHovered ? '0 4px 12px rgba(255, 59, 63, 0.4)' : 'none'
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* X-axis labels */}
+          <div className="flex gap-2 mt-2">
+            {lastWeekData.map((day, index) => (
               <div
-                className="w-full bg-gradient-to-t from-[#FF3B3F] to-[#FF6B6F] rounded-t-lg transition-all duration-300 hover:from-[#E63538] hover:to-[#FF3B3F] cursor-pointer"
-                style={{ height: `${height}%` }}
-              />
-              <span className="text-xs text-gray-400">{day.date.split(' ')[1]}</span>
-            </div>
-          );
-        })}
+                key={index}
+                className={`flex-1 text-center text-xs ${
+                  hoveredBar === index ? 'text-[#FF3B3F] font-semibold' : 'text-gray-400'
+                }`}
+              >
+                {day.date.split(' ')[1]}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      <div className="flex justify-between mt-6 pt-4 border-t border-gray-100">
+        <div className="text-center">
+          <p className="text-xs text-gray-400">Daily Avg</p>
+          <p className="text-lg font-bold text-[#222222]">{avgVisitors}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs text-gray-400">Peak Day</p>
+          <p className="text-lg font-bold text-[#06D6A0]">{maxVisitors}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs text-gray-400">Low Day</p>
+          <p className="text-lg font-bold text-[#FFD166]">{minVisitors}</p>
+        </div>
       </div>
     </div>
   );
 };
 
 // Match Type Breakdown Component
-const MatchTypeBreakdown = () => (
-  <div className="bg-white rounded-lg shadow-card p-6">
-    <div className="flex items-center justify-between mb-6">
-      <div>
-        <h2 className="text-[20px] font-bold text-[#222222]">Match Types</h2>
-        <p className="text-sm text-gray-500">How guests discover your spot</p>
+const MatchTypeBreakdown = ({ matchTypeBreakdown }) => {
+  if (!matchTypeBreakdown || matchTypeBreakdown.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-lg shadow-card p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-[20px] font-bold text-[#222222]">Match Types</h2>
+          <p className="text-sm text-gray-500">How guests discover your spot</p>
+        </div>
       </div>
-    </div>
-    <div className="space-y-4">
-      {matchTypeBreakdown.map((item, index) => (
-        <div key={index} className="flex items-center gap-4">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm text-[#222222] font-medium">{item.type}</span>
-              <span className="text-sm font-bold text-[#222222]">{item.percentage}%</span>
-            </div>
-            <div className="h-2 bg-[#F4F4F4] rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
-              />
+      <div className="space-y-4">
+        {matchTypeBreakdown.map((item, index) => (
+          <div key={index} className="flex items-center gap-4">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm text-[#222222] font-medium">{item.type}</span>
+                <span className="text-sm font-bold text-[#222222]">{item.percentage}%</span>
+              </div>
+              <div className="h-2 bg-[#F4F4F4] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // Quick Actions Component
 const QuickActions = () => (
@@ -463,30 +648,114 @@ const QuickActions = () => (
   </div>
 );
 
-// Main App Component
-function App() {
+// Dashboard Component (main content when authenticated)
+const Dashboard = () => {
+  const [dashboardData, setDashboardData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchDashboardData = async () => {
+    try {
+      const data = await dataAPI.getAllDashboardData();
+      setDashboardData(data);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+      console.error('Failed to fetch dashboard data:', err);
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      await fetchDashboardData();
+      setIsLoading(false);
+    };
+
+    loadData();
+  }, []);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchDashboardData();
+    setIsRefreshing(false);
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#F4F4F4] flex items-center justify-center">
+        <div className="text-center p-8 bg-white rounded-lg shadow-lg">
+          <p className="text-red-500 mb-4">Error loading dashboard: {error}</p>
+          <button
+            onClick={handleRefresh}
+            className="px-4 py-2 bg-[#FF3B3F] text-white rounded-lg hover:bg-[#E63538]"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const {
+    restaurantProfile,
+    impactMetrics,
+    recentExperiences,
+    flavorInsights,
+    trafficData,
+    gouSuggestions,
+    matchTypeBreakdown,
+  } = dashboardData || {};
+
   return (
     <div className="min-h-screen bg-[#F4F4F4]">
-      <Sidebar />
-      <main className="ml-64 p-8">
-        <Header />
-        <ImpactMetrics />
-        <GouSaysCard />
+      <main className="p-8">
+        <Header
+          restaurantProfile={restaurantProfile}
+          onRefresh={handleRefresh}
+          isRefreshing={isRefreshing}
+        />
+        <ImpactMetrics impactMetrics={impactMetrics} />
+        <GouSaysCard gouSuggestions={gouSuggestions} />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="lg:col-span-2">
-            <RecentExperiences />
+            <RecentExperiences recentExperiences={recentExperiences} />
           </div>
           <div className="space-y-6">
-            <FlavorInsights />
+            <FlavorInsights flavorInsights={flavorInsights} />
             <QuickActions />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <TrafficChart />
-          <MatchTypeBreakdown />
+          <TrafficChart trafficData={trafficData} />
+          <MatchTypeBreakdown matchTypeBreakdown={matchTypeBreakdown} />
         </div>
       </main>
     </div>
+  );
+};
+
+// Main App Component with Auth
+const AppContent = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  return isAuthenticated ? <Dashboard /> : <LoginPage />;
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
