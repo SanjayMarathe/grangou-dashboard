@@ -116,4 +116,5 @@ export const dataAPI = {
   },
 };
 
-export default { authAPI, dataAPI };
+const api = { authAPI, dataAPI };
+export default api;
