@@ -143,14 +143,7 @@ const LoginPage = () => {
           </button>
         </form>
 
-        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 font-medium mb-2">Test Accounts:</p>
-          <div className="space-y-1 text-xs text-gray-400">
-            <p><span className="text-gray-600">The Golden Fork:</span> goldenfork@grangou.com / golden123</p>
-            <p><span className="text-gray-600">Spice Garden:</span> spicegarden@grangou.com / spice123</p>
-            <p><span className="text-gray-600">Ocean Blue Bistro:</span> oceanblue@grangou.com / ocean123</p>
-          </div>
-        </div>
+
       </div>
     </div>
   );
