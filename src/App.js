@@ -18,7 +18,8 @@ import {
   ExternalLink,
   Sparkles,
   LogOut,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './AuthContext';
 import { dataAPI } from './api';
@@ -142,8 +143,6 @@ const LoginPage = () => {
             )}
           </button>
         </form>
-
-
       </div>
     </div>
   );
@@ -154,7 +153,7 @@ const Header = ({ restaurantProfile, onRefresh, isRefreshing }) => {
   const { user, logout } = useAuth();
 
   return (
-    <header className="mb-8">
+    <header className="mb-6">
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
         <div className="flex items-center gap-3">
           <GrangouLogo size={36} />
@@ -233,15 +232,15 @@ const ImpactMetrics = ({ impactMetrics }) => {
     {
       label: 'Repeat Visitors',
       value: `${impactMetrics.repeatVisitors}%`,
-      change: 5.2,
+      change: impactMetrics.repeatVisitorsChange,
       icon: <Heart className="text-[#FF3B3F]" size={24} />,
-      positive: true,
+      positive: impactMetrics.repeatVisitorsChange >= 0,
       bgColor: 'bg-[#FF3B3F]/10'
     }
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
       {metrics.map((metric, index) => (
         <div
           key={index}
@@ -278,7 +277,7 @@ const GouSaysCard = ({ gouSuggestions }) => {
   const suggestion = gouSuggestions[currentSuggestion];
 
   return (
-    <div className="bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-lg p-6 mb-8 shadow-lg">
+    <div className="bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-lg p-6 mb-6 shadow-lg">
       <div className="flex items-start gap-4">
         <div className="p-3 bg-white/20 rounded-lg text-white">
           <Sparkles size={24} />
@@ -308,9 +307,105 @@ const GouSaysCard = ({ gouSuggestions }) => {
   );
 };
 
+// Experience Card (shared between list and modal)
+const ExperienceCard = ({ exp, onAcknowledge, expanded }) => {
+  const renderStars = (rating) =>
+    Array.from({ length: 5 }, (_, i) => (
+      <Star key={i} size={16} className={i < rating ? 'text-[#FFD166] fill-[#FFD166]' : 'text-gray-300'} />
+    ));
+
+  return (
+    <div className="p-6 hover:bg-[#F4F4F4]/50 transition-colors">
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 bg-gradient-to-br from-[#FF3B3F] to-[#FF6B6F] rounded-full flex items-center justify-center text-white font-semibold text-sm shrink-0">
+          {exp.avatar}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <span className="font-semibold text-[#222222]">{exp.userName}</span>
+              <div className="flex gap-0.5">{renderStars(exp.rating)}</div>
+            </div>
+            <span className="text-xs text-gray-400 flex items-center gap-1">
+              <Clock size={12} />
+              {exp.timeAgo}
+            </span>
+          </div>
+          <p className={`text-gray-600 text-sm mb-3${expanded ? '' : ' line-clamp-2'}`}>{exp.review}</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-3 py-1 bg-[#FF3B3F]/10 text-[#FF3B3F] text-xs font-semibold rounded-full">
+                {exp.matchType}
+              </span>
+              {(expanded ? exp.keywords : exp.keywords.slice(0, 2)).map((keyword, i) => (
+                <span key={i} className="px-3 py-1 bg-[#F4F4F4] text-gray-600 text-xs rounded-full">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+            {!exp.acknowledged ? (
+              <button
+                onClick={() => onAcknowledge(exp.id)}
+                className="px-4 py-1.5 bg-[#FF3B3F] text-white text-xs font-semibold rounded-lg hover:bg-[#E63538] transition-colors flex items-center gap-1"
+              >
+                <Check size={14} />
+                Acknowledge
+              </button>
+            ) : (
+              <span className="text-xs text-[#06D6A0] font-semibold flex items-center gap-1">
+                <Check size={14} />
+                Acknowledged
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// All Experiences Modal
+const AllExperiencesModal = ({ experiences, onClose, onAcknowledge }) => {
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 pb-12">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-full flex flex-col overflow-hidden animate-fade-in">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="text-[20px] font-bold text-[#222222]">All Guest Experiences</h2>
+            <p className="text-sm text-gray-500">{experiences.length} review{experiences.length !== 1 ? 's' : ''}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-[#F4F4F4] rounded-lg transition-colors text-gray-500 hover:text-[#222222]"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <div className="overflow-y-auto divide-y divide-gray-100">
+          {experiences.map((exp) => (
+            <ExperienceCard key={exp.id} exp={exp} onAcknowledge={onAcknowledge} expanded />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Recent Experiences Component
 const RecentExperiences = ({ recentExperiences: initialExperiences }) => {
   const [experiences, setExperiences] = useState([]);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     if (initialExperiences) {
@@ -324,83 +419,51 @@ const RecentExperiences = ({ recentExperiences: initialExperiences }) => {
     );
   };
 
-  const renderStars = (rating) => {
-    return Array.from({ length: 5 }, (_, i) => (
-      <Star
-        key={i}
-        size={16}
-        className={i < rating ? 'text-[#FFD166] fill-[#FFD166]' : 'text-gray-300'}
-      />
-    ));
-  };
-
   if (!experiences || experiences.length === 0) return null;
 
+  const MAX_VISIBLE = 3;
+  const visible = experiences.slice(0, MAX_VISIBLE);
+  const remaining = experiences.length - MAX_VISIBLE;
+
   return (
-    <div className="bg-white rounded-lg shadow-card overflow-hidden">
-      <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-        <div>
-          <h2 className="text-[20px] font-bold text-[#222222]">Recent Grangou Experiences</h2>
-          <p className="text-sm text-gray-500">What your guests are saying about their matches</p>
-        </div>
-        <button className="text-[#FF3B3F] text-sm font-semibold hover:underline flex items-center gap-1">
-          View All <ExternalLink size={14} />
-        </button>
-      </div>
-      <div className="divide-y divide-gray-100">
-        {experiences.map((exp) => (
-          <div key={exp.id} className="p-6 hover:bg-[#F4F4F4]/50 transition-colors">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-[#FF3B3F] to-[#FF6B6F] rounded-full flex items-center justify-center text-white font-semibold text-sm shrink-0">
-                {exp.avatar}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold text-[#222222]">{exp.userName}</span>
-                    <div className="flex gap-0.5">{renderStars(exp.rating)}</div>
-                  </div>
-                  <span className="text-xs text-gray-400 flex items-center gap-1">
-                    <Clock size={12} />
-                    {exp.timeAgo}
-                  </span>
-                </div>
-                <p className="text-gray-600 text-sm mb-3 line-clamp-2">{exp.review}</p>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="px-3 py-1 bg-[#FF3B3F]/10 text-[#FF3B3F] text-xs font-semibold rounded-full">
-                      {exp.matchType}
-                    </span>
-                    {exp.keywords.slice(0, 2).map((keyword, i) => (
-                      <span
-                        key={i}
-                        className="px-3 py-1 bg-[#F4F4F4] text-gray-600 text-xs rounded-full"
-                      >
-                        {keyword}
-                      </span>
-                    ))}
-                  </div>
-                  {!exp.acknowledged ? (
-                    <button
-                      onClick={() => handleAcknowledge(exp.id)}
-                      className="px-4 py-1.5 bg-[#FF3B3F] text-white text-xs font-semibold rounded-lg hover:bg-[#E63538] transition-colors flex items-center gap-1"
-                    >
-                      <Check size={14} />
-                      Acknowledge
-                    </button>
-                  ) : (
-                    <span className="text-xs text-[#06D6A0] font-semibold flex items-center gap-1">
-                      <Check size={14} />
-                      Acknowledged
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
+    <>
+      <div className="bg-white rounded-lg shadow-card overflow-hidden">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-[20px] font-bold text-[#222222]">Recent Grangou Experiences</h2>
+            <p className="text-sm text-gray-500">What your guests are saying about their matches</p>
           </div>
-        ))}
+          {experiences.length > MAX_VISIBLE && (
+            <button
+              onClick={() => setShowAll(true)}
+              className="text-[#FF3B3F] text-sm font-semibold hover:underline flex items-center gap-1"
+            >
+              View All ({experiences.length}) <ExternalLink size={14} />
+            </button>
+          )}
+        </div>
+        <div className="divide-y divide-gray-100">
+          {visible.map((exp) => (
+            <ExperienceCard key={exp.id} exp={exp} onAcknowledge={handleAcknowledge} />
+          ))}
+        </div>
+        {remaining > 0 && (
+          <button
+            onClick={() => setShowAll(true)}
+            className="w-full py-3 text-sm font-semibold text-[#FF3B3F] hover:bg-[#FF3B3F]/5 transition-colors border-t border-gray-100"
+          >
+            +{remaining} more review{remaining !== 1 ? 's' : ''} — View All
+          </button>
+        )}
       </div>
-    </div>
+      {showAll && (
+        <AllExperiencesModal
+          experiences={experiences}
+          onClose={() => setShowAll(false)}
+          onAcknowledge={handleAcknowledge}
+        />
+      )}
+    </>
   );
 };
 
@@ -613,8 +676,154 @@ const MatchTypeBreakdown = ({ matchTypeBreakdown }) => {
   );
 };
 
+// CSV Export Helper
+const generateCSV = (dashboardData) => {
+  if (!dashboardData) return;
+
+  const { restaurantProfile, impactMetrics, recentExperiences, flavorInsights, trafficData, matchTypeBreakdown, peakHours } = dashboardData;
+  const rows = [];
+
+  const esc = (val) => {
+    const str = String(val ?? '');
+    return str.includes(',') || str.includes('"') || str.includes('\n')
+      ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+  const fmt = (n) => Number(n).toLocaleString('en-US');
+  const stars = (n) => '\u2605'.repeat(n) + '\u2606'.repeat(5 - n);
+  const divider = () => rows.push('');
+  const section = (title) => { divider(); rows.push(`--- ${title} ---`); };
+
+  // Report header
+  const now = new Date();
+  const reportDate = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const restaurantName = restaurantProfile?.name || 'Restaurant';
+  rows.push(`Grangou Dashboard Report - ${esc(restaurantName)}`);
+  rows.push(`Generated on ${reportDate}`);
+
+  // Restaurant Profile
+  section('Restaurant Profile');
+  if (restaurantProfile) {
+    rows.push(`,${esc(restaurantName)}`);
+    rows.push(`Cuisine,${esc(restaurantProfile.cuisine)}`);
+    rows.push(`Location,${esc(restaurantProfile.location)}`);
+    rows.push(`Partner Since,${esc(restaurantProfile.partnerSince)}`);
+  }
+
+  // Impact Metrics
+  section('Impact Metrics');
+  if (impactMetrics) {
+    rows.push('Metric,Value,Change');
+    rows.push(`Total Grangou Guests,"${fmt(impactMetrics.totalGrangouGuests)}",+${impactMetrics.guestGrowth}%`);
+    rows.push(`Estimated Revenue,"$${fmt(impactMetrics.estimatedRevenue)}",+${impactMetrics.revenueGrowth}%`);
+    rows.push(`Average Rating,${impactMetrics.averageRating.toFixed(1)} / 5.0,${impactMetrics.ratingChange >= 0 ? '+' : ''}${impactMetrics.ratingChange}%`);
+    if (impactMetrics.totalReviews != null) rows.push(`Total Reviews,"${fmt(impactMetrics.totalReviews)}",`);
+    rows.push(`Repeat Visitors,${impactMetrics.repeatVisitors}%,`);
+  }
+
+  // Recent Guest Experiences
+  section('Recent Guest Experiences');
+  if (recentExperiences && recentExperiences.length > 0) {
+    rows.push('Guest,Rating,Stars,Review,How They Found You,Keywords,When');
+    recentExperiences.forEach((exp) => {
+      rows.push([
+        esc(exp.userName),
+        `${exp.rating}/5`,
+        stars(exp.rating),
+        esc(exp.review),
+        esc(exp.matchType),
+        esc((exp.keywords || []).join('; ')),
+        esc(exp.timeAgo),
+      ].join(','));
+    });
+    const avgRating = (recentExperiences.reduce((s, e) => s + e.rating, 0) / recentExperiences.length).toFixed(1);
+    rows.push(`,,,,,,`);
+    rows.push(`Total: ${recentExperiences.length} reviews,Avg: ${avgRating}/5,,,,,`);
+  } else {
+    rows.push('No guest experiences recorded yet');
+  }
+
+  // Traffic Overview
+  section('Traffic Overview (Last 30 Days)');
+  if (trafficData && trafficData.length > 0) {
+    const total = trafficData.reduce((s, d) => s + d.visitors, 0);
+    const avg = Math.round(total / trafficData.length);
+    const peak = trafficData.reduce((max, d) => d.visitors > max.visitors ? d : max, trafficData[0]);
+    const low = trafficData.reduce((min, d) => d.visitors < min.visitors ? d : min, trafficData[0]);
+    rows.push(`Total Guests,"${fmt(total)}"`);
+    rows.push(`Daily Average,${avg}`);
+    rows.push(`Best Day,${esc(peak.date)} (${peak.visitors} guests)`);
+    rows.push(`Slowest Day,${esc(low.date)} (${low.visitors} guests)`);
+    rows.push('');
+    rows.push('Date,Guests');
+    trafficData.forEach((d) => {
+      rows.push(`${esc(d.date)},${d.visitors}`);
+    });
+  } else {
+    rows.push('No traffic data recorded yet');
+  }
+
+  // How Guests Find You (Match Types)
+  section('How Guests Find You');
+  if (matchTypeBreakdown && matchTypeBreakdown.length > 0) {
+    rows.push('Discovery Method,Share,Bar');
+    matchTypeBreakdown.forEach((m) => {
+      const bar = '\u2588'.repeat(Math.round(m.percentage / 5)) + '\u2591'.repeat(20 - Math.round(m.percentage / 5));
+      rows.push(`${esc(m.type)},${m.percentage}%,${bar}`);
+    });
+  } else {
+    rows.push('No match type data recorded yet');
+  }
+
+  // Busiest Hours
+  section('Busiest Hours');
+  if (peakHours && peakHours.length > 0) {
+    const peakHour = peakHours.reduce((max, h) => h.traffic > max.traffic ? h : max, peakHours[0]);
+    rows.push(`Peak Hour: ${esc(peakHour.hour)} (${peakHour.traffic} guests)`);
+    rows.push('');
+    rows.push('Hour,Guests,Activity');
+    peakHours.forEach((h) => {
+      const bar = '\u2588'.repeat(Math.round((h.traffic / peakHour.traffic) * 15));
+      rows.push(`${esc(h.hour)},${h.traffic},${bar}`);
+    });
+  } else {
+    rows.push('No peak hours data recorded yet');
+  }
+
+  // Guest Favorites (Flavor Insights)
+  section('Guest Favorites');
+  if (flavorInsights && flavorInsights.length > 0) {
+    rows.push('Menu Item,Popularity,Total Orders');
+    flavorInsights.forEach((f) => {
+      const bar = '\u2588'.repeat(Math.round(f.percentage / 5)) + '\u2591'.repeat(20 - Math.round(f.percentage / 5));
+      rows.push(`${esc(f.item)},${f.percentage}% ${bar},"${fmt(f.orders)}"`);
+    });
+    const totalOrders = flavorInsights.reduce((s, f) => s + f.orders, 0);
+    rows.push(`,,`);
+    rows.push(`Total,,"${fmt(totalOrders)}"`);
+  } else {
+    rows.push('No flavor data recorded yet');
+  }
+
+  // Footer
+  divider();
+  rows.push('Report generated by Grangou Restaurant Portal');
+
+  const csvContent = rows.join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const today = now.toISOString().split('T')[0];
+  const slug = restaurantName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  link.href = url;
+  link.download = `grangou-report-${slug}-${today}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 // Quick Actions Component
-const QuickActions = () => (
+const QuickActions = ({ onExportReport }) => (
   <div className="bg-white rounded-lg shadow-card p-6">
     <h2 className="text-[20px] font-bold text-[#222222] mb-4">Quick Actions</h2>
     <div className="grid grid-cols-2 gap-3">
@@ -633,7 +842,7 @@ const QuickActions = () => (
         <p className="text-sm font-semibold text-[#222222]">View Guest List</p>
         <p className="text-xs text-gray-500">Today's matches</p>
       </button>
-      <button className="p-4 bg-[#F4F4F4] hover:bg-[#FF3B3F]/10 rounded-lg text-left transition-colors group border border-transparent hover:border-[#FF3B3F]/20">
+      <button onClick={onExportReport} className="p-4 bg-[#F4F4F4] hover:bg-[#FF3B3F]/10 rounded-lg text-left transition-colors group border border-transparent hover:border-[#FF3B3F]/20">
         <BarChart3 size={20} className="text-[#FF3B3F] mb-2" />
         <p className="text-sm font-semibold text-[#222222]">Export Report</p>
         <p className="text-xs text-gray-500">Monthly insights</p>
@@ -704,11 +913,14 @@ const Dashboard = () => {
     trafficData,
     gouSuggestions,
     matchTypeBreakdown,
+    peakHours,
   } = dashboardData || {};
+
+  const handleExportReport = () => generateCSV(dashboardData);
 
   return (
     <div className="min-h-screen bg-[#F4F4F4]">
-      <main className="p-8">
+      <main className="p-8 pb-12">
         <Header
           restaurantProfile={restaurantProfile}
           onRefresh={handleRefresh}
@@ -716,18 +928,16 @@ const Dashboard = () => {
         />
         <ImpactMetrics impactMetrics={impactMetrics} />
         <GouSaysCard gouSuggestions={gouSuggestions} />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
             <RecentExperiences recentExperiences={recentExperiences} />
+            <TrafficChart trafficData={trafficData} />
+            <MatchTypeBreakdown matchTypeBreakdown={matchTypeBreakdown} />
           </div>
           <div className="space-y-6">
             <FlavorInsights flavorInsights={flavorInsights} />
-            <QuickActions />
+            <QuickActions onExportReport={handleExportReport} />
           </div>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <TrafficChart trafficData={trafficData} />
-          <MatchTypeBreakdown matchTypeBreakdown={matchTypeBreakdown} />
         </div>
       </main>
     </div>

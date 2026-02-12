@@ -172,6 +172,29 @@ async function handleMetrics(restaurantName: string) {
   const repeatUsers = Object.values(userVisitCounts).filter((c) => c >= 2).length;
   const repeatVisitors = totalUniqueUsers > 0 ? Math.round((repeatUsers / totalUniqueUsers) * 100) : 0;
 
+  // Repeat visitors change (current 30 days vs previous 30 days)
+  const currentVisitCounts: Record<string, number> = {};
+  const previousVisitCounts: Record<string, number> = {};
+  completedMatches.forEach((m) => {
+    const date = new Date(m.completed_at || m.created_at);
+    (m.matched_user_ids || []).forEach((uid: string) => {
+      if (date >= thirtyDaysAgo) {
+        currentVisitCounts[uid] = (currentVisitCounts[uid] || 0) + 1;
+      } else if (date >= sixtyDaysAgo) {
+        previousVisitCounts[uid] = (previousVisitCounts[uid] || 0) + 1;
+      }
+    });
+  });
+  const currentUniqueUsers = Object.keys(currentVisitCounts).length;
+  const currentRepeatUsers = Object.values(currentVisitCounts).filter((c) => c >= 2).length;
+  const currentRepeatRate = currentUniqueUsers > 0 ? (currentRepeatUsers / currentUniqueUsers) * 100 : 0;
+  const previousUniqueUsers = Object.keys(previousVisitCounts).length;
+  const previousRepeatUsers = Object.values(previousVisitCounts).filter((c) => c >= 2).length;
+  const previousRepeatRate = previousUniqueUsers > 0 ? (previousRepeatUsers / previousUniqueUsers) * 100 : 0;
+  const repeatVisitorsChange = previousRepeatRate > 0
+    ? Math.round(((currentRepeatRate - previousRepeatRate) / previousRepeatRate) * 100 * 10) / 10
+    : 0;
+
   return {
     totalGrangouGuests,
     guestGrowth,
@@ -181,6 +204,7 @@ async function handleMetrics(restaurantName: string) {
     ratingChange,
     totalReviews,
     repeatVisitors,
+    repeatVisitorsChange,
   };
 }
 
