@@ -26,6 +26,7 @@ import { dataAPI } from './api';
 import './index.css';
 
 // Brand Colors - Grangou Style Guide
+// eslint-disable-next-line no-unused-vars
 const colors = {
   red: '#FF3B3F',
   redHover: '#E63538',
@@ -913,7 +914,6 @@ const Dashboard = () => {
     trafficData,
     gouSuggestions,
     matchTypeBreakdown,
-    peakHours,
   } = dashboardData || {};
 
   const handleExportReport = () => generateCSV(dashboardData);
