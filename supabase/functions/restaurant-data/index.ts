@@ -13,7 +13,7 @@ const mobile = createClient(mobileUrl, mobileKey);
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -75,7 +75,7 @@ async function handleProfile(restaurantName: string, createdAt: string) {
   };
 }
 
-async function handleMetrics(restaurantName: string) {
+async function handleMetrics(restaurantName: string, restaurantId: number) {
   // Get all matches for this restaurant
   const { data: allMatches } = await mobile
     .from("matches")
@@ -112,23 +112,48 @@ async function handleMetrics(restaurantName: string) {
     ? Math.round(((currentPeriodGuests.size - previousPeriodGuests.size) / previousPeriodGuests.size) * 100 * 10) / 10
     : 0;
 
-  // Estimated revenue (use $35 per person as default)
-  const avgCostPerPerson = 35;
-  let totalGuests = 0;
-  completedMatches.forEach((m) => {
-    totalGuests += (m.matched_user_ids || []).length;
-  });
-  const estimatedRevenue = totalGuests * avgCostPerPerson;
+  // Try real revenue from guest_orders with menu item prices
+  const { data: orderRevenue } = await b2b
+    .from("guest_orders")
+    .select("ordered_at, quantity, menu_items(price)")
+    .eq("restaurant_id", restaurantId);
 
-  // Revenue growth (same period comparison)
+  const hasRealRevenue = (orderRevenue || []).some((o: any) => o.menu_items?.price != null);
+
+  let estimatedRevenue: number;
   let currentRevenue = 0;
   let previousRevenue = 0;
-  completedMatches.forEach((m) => {
-    const date = new Date(m.completed_at || m.created_at);
-    const guests = (m.matched_user_ids || []).length;
-    if (date >= thirtyDaysAgo) currentRevenue += guests * avgCostPerPerson;
-    else if (date >= sixtyDaysAgo) previousRevenue += guests * avgCostPerPerson;
-  });
+
+  if (hasRealRevenue && orderRevenue && orderRevenue.length > 0) {
+    // Use real order data
+    estimatedRevenue = 0;
+    orderRevenue.forEach((o: any) => {
+      const price = Number(o.menu_items?.price) || 0;
+      const qty = o.quantity || 1;
+      const amount = price * qty;
+      estimatedRevenue += amount;
+
+      const date = new Date(o.ordered_at);
+      if (date >= thirtyDaysAgo) currentRevenue += amount;
+      else if (date >= sixtyDaysAgo) previousRevenue += amount;
+    });
+  } else {
+    // Fallback: $35 per person estimate
+    const avgCostPerPerson = 35;
+    let totalGuests = 0;
+    completedMatches.forEach((m) => {
+      totalGuests += (m.matched_user_ids || []).length;
+    });
+    estimatedRevenue = totalGuests * avgCostPerPerson;
+
+    completedMatches.forEach((m) => {
+      const date = new Date(m.completed_at || m.created_at);
+      const guests = (m.matched_user_ids || []).length;
+      if (date >= thirtyDaysAgo) currentRevenue += guests * avgCostPerPerson;
+      else if (date >= sixtyDaysAgo) previousRevenue += guests * avgCostPerPerson;
+    });
+  }
+
   const revenueGrowth = previousRevenue > 0
     ? Math.round(((currentRevenue - previousRevenue) / previousRevenue) * 100 * 10) / 10
     : 0;
@@ -279,15 +304,203 @@ async function handleExperiences(restaurantName: string) {
   });
 }
 
-function handleFlavors() {
-  // Mock data — no real source exists
-  return [
-    { item: "Truffle Parmesan Fries", percentage: 87, orders: 234 },
-    { item: "Spicy Tuna Tartare", percentage: 76, orders: 189 },
-    { item: "Matcha Latte", percentage: 72, orders: 178 },
-    { item: "Grilled Salmon Bowl", percentage: 65, orders: 156 },
-    { item: "Chocolate Lava Cake", percentage: 58, orders: 142 },
-  ];
+async function handleFlavors(restaurantId: number, period?: string) {
+  // Determine date filter
+  let dateFilter: string | null = null;
+  const now = new Date();
+  if (period === "week") {
+    dateFilter = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  } else if (period === "month") {
+    dateFilter = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  }
+  // "all" or undefined = no date filter
+
+  // Get total order quantity for percentage calculation
+  let totalQuery = b2b
+    .from("guest_orders")
+    .select("quantity")
+    .eq("restaurant_id", restaurantId);
+  if (dateFilter) totalQuery = totalQuery.gte("ordered_at", dateFilter);
+  const { data: allOrders } = await totalQuery;
+  const totalQuantity = (allOrders || []).reduce((sum: number, o: { quantity: number }) => sum + (o.quantity || 1), 0);
+
+  if (totalQuantity === 0) {
+    // No orders logged yet — return empty array (frontend shows setup prompt)
+    return [];
+  }
+
+  // Get top 5 items by total quantity
+  let ordersQuery = b2b
+    .from("guest_orders")
+    .select("menu_item_id, quantity, menu_items(name, category)")
+    .eq("restaurant_id", restaurantId);
+  if (dateFilter) ordersQuery = ordersQuery.gte("ordered_at", dateFilter);
+  const { data: orders } = await ordersQuery;
+
+  // Aggregate by menu item
+  const itemMap: Record<number, { name: string; category: string; totalQty: number; orderCount: number }> = {};
+  (orders || []).forEach((o: any) => {
+    const id = o.menu_item_id;
+    if (!itemMap[id]) {
+      const mi = o.menu_items;
+      itemMap[id] = {
+        name: mi?.name || "Unknown Item",
+        category: mi?.category || "",
+        totalQty: 0,
+        orderCount: 0,
+      };
+    }
+    itemMap[id].totalQty += o.quantity || 1;
+    itemMap[id].orderCount += 1;
+  });
+
+  const sorted = Object.values(itemMap)
+    .sort((a, b) => b.totalQty - a.totalQty)
+    .slice(0, 5);
+
+  return sorted.map((item) => ({
+    item: item.name,
+    category: item.category,
+    percentage: Math.round((item.totalQty / totalQuantity) * 100),
+    orders: item.totalQty,
+  }));
+}
+
+// ============================================
+// MENU MANAGEMENT
+// ============================================
+
+async function handleMenuGet(restaurantId: number) {
+  const { data, error } = await b2b
+    .from("menu_items")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("category", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function handleMenuCreate(restaurantId: number, body: any) {
+  // Support bulk create (array) or single item
+  const items = Array.isArray(body) ? body : [body];
+
+  const rows = items.map((item: any) => ({
+    restaurant_id: restaurantId,
+    name: item.name,
+    category: item.category || null,
+    price: item.price || null,
+    is_active: true,
+  }));
+
+  const { data, error } = await b2b
+    .from("menu_items")
+    .insert(rows)
+    .select();
+
+  if (error) throw error;
+  return data;
+}
+
+async function handleMenuUpdate(restaurantId: number, body: any) {
+  const { id, name, category, price, is_active } = body;
+  if (!id) throw new Error("Menu item id is required");
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (name !== undefined) updates.name = name;
+  if (category !== undefined) updates.category = category;
+  if (price !== undefined) updates.price = price;
+  if (is_active !== undefined) updates.is_active = is_active;
+
+  const { data, error } = await b2b
+    .from("menu_items")
+    .update(updates)
+    .eq("id", id)
+    .eq("restaurant_id", restaurantId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function handleMenuDelete(restaurantId: number, itemId: number) {
+  // Soft delete
+  const { data, error } = await b2b
+    .from("menu_items")
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq("id", itemId)
+    .eq("restaurant_id", restaurantId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// ============================================
+// ORDER LOGGING
+// ============================================
+
+async function handleOrdersGet(restaurantId: number) {
+  const { data, error } = await b2b
+    .from("guest_orders")
+    .select("*, menu_items(name, category, price)")
+    .eq("restaurant_id", restaurantId)
+    .order("ordered_at", { ascending: false })
+    .limit(100);
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function handleOrdersCreate(restaurantId: number, body: any) {
+  const { match_id, items } = body;
+  // items = [{ menu_item_id, quantity }]
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw new Error("items array is required");
+  }
+
+  const rows = items.map((item: any) => ({
+    restaurant_id: restaurantId,
+    match_id: match_id || null,
+    menu_item_id: item.menu_item_id,
+    quantity: item.quantity || 1,
+  }));
+
+  const { data, error } = await b2b
+    .from("guest_orders")
+    .insert(rows)
+    .select("*, menu_items(name, category, price)");
+
+  if (error) throw error;
+  return data;
+}
+
+async function handleOrdersForMatch(restaurantId: number, matchId: string) {
+  const { data, error } = await b2b
+    .from("guest_orders")
+    .select("*, menu_items(name, category, price)")
+    .eq("restaurant_id", restaurantId)
+    .eq("match_id", matchId);
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function handleOrdersDelete(restaurantId: number, body: any) {
+  const { match_id } = body;
+  if (!match_id) throw new Error("match_id is required");
+
+  const { error } = await b2b
+    .from("guest_orders")
+    .delete()
+    .eq("restaurant_id", restaurantId)
+    .eq("match_id", match_id);
+
+  if (error) throw error;
+  return { success: true };
 }
 
 async function handleTraffic(restaurantName: string) {
@@ -425,16 +638,127 @@ async function handlePeakHours(restaurantName: string) {
 }
 
 // ============================================
+// STRIPE INSIGHTS HANDLER
+// ============================================
+
+async function handleStripeInsights(restaurantId: number) {
+  const { data: restaurant } = await b2b
+    .from("restaraunts")
+    .select("stripe_access_token, stripe_connected")
+    .eq("id", restaurantId)
+    .single();
+
+  if (!restaurant?.stripe_connected || !restaurant?.stripe_access_token) {
+    return [];
+  }
+
+  const response = await fetch("https://api.stripe.com/v1/charges?limit=100", {
+    headers: { "Authorization": `Bearer ${restaurant.stripe_access_token}` },
+  });
+  const data = await response.json();
+
+  if (!data.data || data.data.length === 0) return [];
+
+  // Group succeeded charges by description
+  const itemMap: Record<string, { revenue: number; count: number }> = {};
+  let totalRevenue = 0;
+
+  for (const charge of data.data) {
+    if (charge.status !== "succeeded") continue;
+    const key = (charge.description || "Other").trim();
+    if (!itemMap[key]) itemMap[key] = { revenue: 0, count: 0 };
+    itemMap[key].revenue += charge.amount;
+    itemMap[key].count += 1;
+    totalRevenue += charge.amount;
+  }
+
+  if (totalRevenue === 0) return [];
+
+  return Object.entries(itemMap)
+    .sort((a, b) => b[1].revenue - a[1].revenue)
+    .slice(0, 5)
+    .map(([name, stats]) => ({
+      item: name,
+      revenue: stats.revenue / 100,
+      count: stats.count,
+      percentage: Math.round((stats.revenue / totalRevenue) * 100),
+    }));
+}
+
+// ============================================
+// INTEGRATIONS HANDLERS
+// ============================================
+
+async function handleGetIntegrations(restaurantId: number) {
+  const { data } = await b2b
+    .from("restaraunts")
+    .select("stripe_connected, stripe_user_id")
+    .eq("id", restaurantId)
+    .single();
+
+  return {
+    stripe: {
+      connected: data?.stripe_connected || false,
+      stripe_user_id: data?.stripe_user_id || null,
+    },
+  };
+}
+
+async function handleStripeConnect(restaurantId: number, code: string) {
+  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY")!;
+
+  const tokenResponse = await fetch("https://connect.stripe.com/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_secret: stripeSecretKey,
+      code,
+      grant_type: "authorization_code",
+    }).toString(),
+  });
+
+  const tokenData = await tokenResponse.json();
+  if (tokenData.error) {
+    throw new Error(tokenData.error_description || tokenData.error);
+  }
+
+  const { access_token, stripe_user_id } = tokenData;
+
+  const { error } = await b2b
+    .from("restaraunts")
+    .update({
+      stripe_access_token: access_token,
+      stripe_user_id,
+      stripe_connected: true,
+    })
+    .eq("id", restaurantId);
+
+  if (error) throw error;
+
+  return { success: true, stripe_user_id };
+}
+
+async function handleStripeDisconnect(restaurantId: number) {
+  const { error } = await b2b
+    .from("restaraunts")
+    .update({
+      stripe_access_token: null,
+      stripe_user_id: null,
+      stripe_connected: false,
+    })
+    .eq("id", restaurantId);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+// ============================================
 // MAIN HANDLER
 // ============================================
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
-  }
-
-  if (req.method !== "GET") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
   // Authenticate
@@ -444,35 +768,150 @@ Deno.serve(async (req) => {
   }
 
   const restaurantName = user.name;
+  const restaurantId = user.id;
   const url = new URL(req.url);
-  const path = url.pathname.split("/").pop();
+  const fullPath = url.pathname;
+  const path = fullPath.split("/").pop();
+  const method = req.method;
 
-  switch (path) {
-    case "profile":
-      return jsonResponse(await handleProfile(restaurantName, user.created_at));
+  try {
+    // Integration routes (check full path)
+    if (fullPath.includes("/integrations/stripe/connect") && method === "POST") {
+      const body = await req.json();
+      if (!body.code) return jsonResponse({ error: "code is required" }, 400);
+      return jsonResponse(await handleStripeConnect(restaurantId, body.code));
+    }
+    if (fullPath.includes("/integrations/stripe/disconnect") && method === "DELETE") {
+      return jsonResponse(await handleStripeDisconnect(restaurantId));
+    }
 
-    case "metrics":
-      return jsonResponse(await handleMetrics(restaurantName));
+    // GET-only endpoints (existing dashboard data)
+    if (method === "GET") {
+      switch (path) {
+        case "integrations":
+          return jsonResponse(await handleGetIntegrations(restaurantId));
+        case "stripe-insights":
+          return jsonResponse(await handleStripeInsights(restaurantId));
+        case "profile":
+          return jsonResponse(await handleProfile(restaurantName, user.created_at));
+        case "metrics":
+          return jsonResponse(await handleMetrics(restaurantName, restaurantId));
+        case "experiences":
+          return jsonResponse(await handleExperiences(restaurantName));
+        case "flavors": {
+          const period = url.searchParams.get("period") || undefined;
+          return jsonResponse(await handleFlavors(restaurantId, period));
+        }
+        case "traffic":
+          return jsonResponse(await handleTraffic(restaurantName));
+        case "suggestions":
+          return jsonResponse(handleSuggestions());
+        case "match-types":
+          return jsonResponse(await handleMatchTypes(restaurantName));
+        case "peak-hours":
+          return jsonResponse(await handlePeakHours(restaurantName));
+        case "menu":
+          return jsonResponse(await handleMenuGet(restaurantId));
+        case "orders": {
+          const matchId = url.searchParams.get("match_id");
+          if (matchId) {
+            return jsonResponse(await handleOrdersForMatch(restaurantId, matchId));
+          }
+          return jsonResponse(await handleOrdersGet(restaurantId));
+        }
+        case "matches-today": {
+          // Get recent matches for the order logging UI
+          const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+          const { data: recentMatches } = await mobile
+            .from("matches")
+            .select("id, match_type, matched_user_ids, status, created_at, completed_at")
+            .eq("restaurant_name", restaurantName)
+            .gte("created_at", twoDaysAgo.toISOString())
+            .order("created_at", { ascending: false });
 
-    case "experiences":
-      return jsonResponse(await handleExperiences(restaurantName));
+          if (!recentMatches || recentMatches.length === 0) {
+            return jsonResponse([]);
+          }
 
-    case "flavors":
-      return jsonResponse(handleFlavors());
+          // Resolve user names
+          const userIds = new Set<string>();
+          recentMatches.forEach((m) => {
+            (m.matched_user_ids || []).forEach((uid: string) => userIds.add(uid));
+          });
+          const { data: users } = await mobile
+            .from("users")
+            .select("id, first_name, last_name")
+            .in("id", Array.from(userIds));
+          const userMap: Record<string, { first_name: string; last_name: string }> = {};
+          (users || []).forEach((u) => { userMap[u.id] = u; });
 
-    case "traffic":
-      return jsonResponse(await handleTraffic(restaurantName));
+          const matchTypeMap: Record<string, string> = {
+            "1v1": "1-on-1 Date",
+            "group_4": "Group (4)",
+          };
 
-    case "suggestions":
-      return jsonResponse(handleSuggestions());
+          const result = recentMatches.map((m) => {
+            const guestNames = (m.matched_user_ids || []).map((uid: string) => {
+              const u = userMap[uid];
+              return u ? `${u.first_name} ${u.last_name?.charAt(0) || ""}.` : "Guest";
+            });
+            const date = new Date(m.created_at);
+            const timeStr = date.toLocaleString("en-US", {
+              month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+            });
+            return {
+              id: m.id,
+              matchType: matchTypeMap[m.match_type] || m.match_type,
+              guests: guestNames,
+              status: m.status,
+              time: timeStr,
+              created_at: m.created_at,
+            };
+          });
 
-    case "match-types":
-      return jsonResponse(await handleMatchTypes(restaurantName));
+          return jsonResponse(result);
+        }
+      }
+    }
 
-    case "peak-hours":
-      return jsonResponse(await handlePeakHours(restaurantName));
+    // POST endpoints
+    if (method === "POST") {
+      const body = await req.json();
+      switch (path) {
+        case "menu":
+          return jsonResponse(await handleMenuCreate(restaurantId, body), 201);
+        case "orders":
+          return jsonResponse(await handleOrdersCreate(restaurantId, body), 201);
+      }
+    }
 
-    default:
-      return jsonResponse({ error: "Not Found", message: `Unknown action: ${path}` }, 404);
+    // PUT endpoints
+    if (method === "PUT") {
+      const body = await req.json();
+      switch (path) {
+        case "menu":
+          return jsonResponse(await handleMenuUpdate(restaurantId, body));
+      }
+    }
+
+    // DELETE endpoints
+    if (method === "DELETE") {
+      switch (path) {
+        case "menu": {
+          const itemId = url.searchParams.get("id");
+          if (!itemId) return jsonResponse({ error: "id query parameter required" }, 400);
+          return jsonResponse(await handleMenuDelete(restaurantId, parseInt(itemId)));
+        }
+        case "orders": {
+          const body = await req.json();
+          return jsonResponse(await handleOrdersDelete(restaurantId, body));
+        }
+      }
+    }
+
+    return jsonResponse({ error: "Not Found", message: `Unknown action: ${method} ${path}` }, 404);
+  } catch (err) {
+    console.error("Handler error:", err);
+    return jsonResponse({ error: "Internal error", message: (err as Error).message }, 500);
   }
 });

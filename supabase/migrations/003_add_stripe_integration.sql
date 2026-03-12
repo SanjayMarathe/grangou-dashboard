@@ -1,0 +1,4 @@
+ALTER TABLE restaraunts
+  ADD COLUMN IF NOT EXISTS stripe_access_token TEXT,
+  ADD COLUMN IF NOT EXISTS stripe_user_id TEXT,
+  ADD COLUMN IF NOT EXISTS stripe_connected BOOLEAN DEFAULT FALSE;
