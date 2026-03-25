@@ -5,6 +5,11 @@ const b2bUrl = Deno.env.get("SUPABASE_URL")!;
 const b2bKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const b2b = createClient(b2bUrl, b2bKey);
 
+// Mobile app database (read-only, for Grangou tools)
+const mobileUrl = Deno.env.get("MOBILE_APP_URL") || "https://fnfeiitawuvgtxfpmmvg.supabase.co";
+const mobileKey = Deno.env.get("MOBILE_APP_SERVICE_KEY") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZmVpaXRhd3V2Z3R4ZnBtbXZnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDg0NTU2OCwiZXhwIjoyMDc2NDIxNTY4fQ.z-Ac1WQYw0HypAWW_TUiqCcyoh2KBV7cJ1PbuyRjvlo";
+const mobile = createClient(mobileUrl, mobileKey);
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -19,7 +24,11 @@ function decodeToken(token: string): { userId: number; email: string } | null {
   }
 }
 
-async function authenticate(req: Request): Promise<{ id: number; name: string; email: string } | null> {
+async function authenticate(req: Request): Promise<{
+  id: number; name: string; email: string;
+  stripe_access_token?: string; stripe_connected?: boolean;
+  clover_access_token?: string; clover_merchant_id?: string; clover_connected?: boolean;
+} | null> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
 
@@ -28,7 +37,7 @@ async function authenticate(req: Request): Promise<{ id: number; name: string; e
 
   const { data } = await b2b
     .from("restaraunts")
-    .select("id, name, email, stripe_access_token, stripe_connected")
+    .select("id, name, email, stripe_access_token, stripe_connected, clover_access_token, clover_merchant_id, clover_connected")
     .eq("id", payload.userId)
     .single();
 
@@ -98,6 +107,80 @@ const STRIPE_TOOLS = [
 ];
 
 // ============================================
+// CLOVER TOOL DEFINITIONS
+// ============================================
+
+const CLOVER_TOOLS = [
+  {
+    name: "clover_list_orders",
+    description: "List recent orders from the Clover POS system, including line items and totals",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of orders to return (default 10, max 50)" },
+      },
+    },
+  },
+  {
+    name: "clover_list_payments",
+    description: "List recent payments processed through Clover POS",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of payments to return (default 10, max 50)" },
+      },
+    },
+  },
+  {
+    name: "clover_list_items",
+    description: "List inventory items configured in Clover POS",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of items to return (default 50, max 200)" },
+      },
+    },
+  },
+  {
+    name: "clover_list_customers",
+    description: "List customers stored in the Clover POS system",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of customers to return (default 10, max 50)" },
+      },
+    },
+  },
+];
+
+// ============================================
+// GRANGOU TOOL DEFINITIONS (always active)
+// ============================================
+
+const GRANGOU_TOOLS = [
+  {
+    name: "grangou_get_metrics",
+    description: "Get Grangou platform metrics: total completed matches, unique guests, and average guest rating for this restaurant",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "grangou_get_recent_experiences",
+    description: "Get recent guest experiences and feedback from Grangou matches",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of recent experiences to return (default 5)" },
+      },
+    },
+  },
+  {
+    name: "grangou_get_peak_hours",
+    description: "Get peak hours data showing when the most Grangou guest matches occur",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+];
+
+// ============================================
 // STRIPE API CALLER
 // ============================================
 
@@ -119,10 +202,111 @@ async function callStripeAPI(
   };
 
   const url = endpointMap[toolName];
-  if (!url) throw new Error(`Unknown tool: ${toolName}`);
+  if (!url) throw new Error(`Unknown Stripe tool: ${toolName}`);
 
   const response = await fetch(url, { headers });
   return response.json();
+}
+
+// ============================================
+// CLOVER API CALLER
+// ============================================
+
+async function callCloverAPI(
+  toolName: string,
+  input: Record<string, unknown>,
+  cloverToken: string,
+  merchantId: string,
+): Promise<unknown> {
+  const headers = { "Authorization": `Bearer ${cloverToken}` };
+  const base = `https://api.clover.com/v3/merchants/${merchantId}`;
+  const limit = input.limit || 10;
+
+  const endpointMap: Record<string, string> = {
+    clover_list_orders: `${base}/orders?limit=${limit}&expand=lineItems`,
+    clover_list_payments: `${base}/payments?limit=${limit}`,
+    clover_list_items: `${base}/items?limit=${input.limit || 50}`,
+    clover_list_customers: `${base}/customers?limit=${limit}`,
+  };
+
+  const url = endpointMap[toolName];
+  if (!url) throw new Error(`Unknown Clover tool: ${toolName}`);
+
+  const response = await fetch(url, { headers });
+  return response.json();
+}
+
+// ============================================
+// GRANGOU TOOL CALLER
+// ============================================
+
+async function callGrangouTool(
+  toolName: string,
+  input: Record<string, unknown>,
+  restaurantName: string,
+): Promise<unknown> {
+  if (toolName === "grangou_get_metrics") {
+    const { data: matches } = await mobile
+      .from("matches")
+      .select("id, status, matched_user_ids, completion_feedback")
+      .eq("restaurant_name", restaurantName);
+
+    const completed = (matches || []).filter((m) => m.status === "completed_successful");
+    const uniqueGuests = new Set<string>();
+    completed.forEach((m) => (m.matched_user_ids || []).forEach((uid: string) => uniqueGuests.add(uid)));
+
+    const ratings = completed
+      .map((m) => m.completion_feedback?.rating)
+      .filter((r) => typeof r === "number");
+    const avgRating = ratings.length > 0
+      ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)
+      : null;
+
+    return {
+      total_matches: completed.length,
+      unique_guests: uniqueGuests.size,
+      average_rating: avgRating,
+    };
+  }
+
+  if (toolName === "grangou_get_recent_experiences") {
+    const limit = (input.limit as number) || 5;
+    const { data: matches } = await mobile
+      .from("matches")
+      .select("id, created_at, completion_feedback, matched_user_ids")
+      .eq("restaurant_name", restaurantName)
+      .eq("status", "completed_successful")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    return (matches || []).map((m) => ({
+      date: m.created_at,
+      feedback: m.completion_feedback,
+      guest_count: (m.matched_user_ids || []).length,
+    }));
+  }
+
+  if (toolName === "grangou_get_peak_hours") {
+    const { data: matches } = await mobile
+      .from("matches")
+      .select("created_at")
+      .eq("restaurant_name", restaurantName)
+      .eq("status", "completed_successful");
+
+    const hourCounts: Record<number, number> = {};
+    for (let i = 0; i < 24; i++) hourCounts[i] = 0;
+    (matches || []).forEach((m) => {
+      const hour = new Date(m.created_at).getUTCHours();
+      hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+    });
+
+    return Object.entries(hourCounts).map(([hour, count]) => ({
+      hour: parseInt(hour),
+      matches: count,
+    }));
+  }
+
+  throw new Error(`Unknown Grangou tool: ${toolName}`);
 }
 
 // ============================================
@@ -134,9 +318,7 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const user = await authenticate(req) as (
-    { id: number; name: string; email: string; stripe_access_token?: string; stripe_connected?: boolean } | null
-  );
+  const user = await authenticate(req);
 
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -145,14 +327,6 @@ Deno.serve(async (req) => {
     });
   }
 
-  if (!user.stripe_connected || !user.stripe_access_token) {
-    return new Response(JSON.stringify({ error: "Stripe not connected" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const stripeToken = user.stripe_access_token;
   const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
   let body: { message: string; history: { role: string; content: unknown }[] };
@@ -168,6 +342,14 @@ Deno.serve(async (req) => {
   const { message, history = [] } = body;
   const encoder = new TextEncoder();
 
+  // Build active tools based on connected integrations
+  const activeTools = [...GRANGOU_TOOLS];
+  if (user.stripe_connected && user.stripe_access_token) activeTools.push(...STRIPE_TOOLS);
+  if (user.clover_connected && user.clover_access_token) activeTools.push(...CLOVER_TOOLS);
+
+  const stripeStatus = user.stripe_connected ? "connected" : "not connected";
+  const cloverStatus = user.clover_connected ? "connected" : "not connected";
+
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: Record<string, unknown>) => {
@@ -175,7 +357,6 @@ Deno.serve(async (req) => {
       };
 
       try {
-        // Build initial message list (filter to valid roles only)
         const messages: { role: string; content: unknown }[] = [
           ...history.filter((m) => m.role === "user" || m.role === "assistant"),
           { role: "user", content: message },
@@ -194,8 +375,17 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               model: "claude-sonnet-4-6",
               max_tokens: 4096,
-              system: `You are Gou, an AI financial assistant for ${user.name} restaurant on the Grangou platform. You have access to the restaurant's Stripe account. Help them understand their revenue, charges, customers, and financial performance. Be concise and helpful. Format currency values clearly.`,
-              tools: STRIPE_TOOLS,
+              system: `You are Gou, the AI restaurant management copilot for ${user.name} on the Grangou platform.
+
+Data sources available:
+- Grangou Platform (always active): guest match metrics, experiences, ratings, peak hours
+- Stripe (${stripeStatus}): payment processing, revenue, charges, customers
+- Clover POS (${cloverStatus}): POS orders, payments, inventory, customers
+
+Help the owner understand their business holistically. Be concise and actionable.
+When a source is disconnected, mention what insights would be unlocked by connecting it.
+Format currency values clearly.`,
+              tools: activeTools,
               messages,
             }),
           });
@@ -207,7 +397,6 @@ Deno.serve(async (req) => {
             break;
           }
 
-          // Emit any text blocks
           for (const block of data.content || []) {
             if (block.type === "text" && block.text) {
               emit({ type: "text_delta", text: block.text });
@@ -215,7 +404,6 @@ Deno.serve(async (req) => {
           }
 
           if (data.stop_reason === "tool_use") {
-            // Add assistant message with all content blocks
             messages.push({ role: "assistant", content: data.content });
 
             const toolResults: {
@@ -230,7 +418,20 @@ Deno.serve(async (req) => {
 
                 let result: unknown;
                 try {
-                  result = await callStripeAPI(block.name, block.input || {}, stripeToken);
+                  if (block.name.startsWith("stripe_")) {
+                    result = await callStripeAPI(block.name, block.input || {}, user.stripe_access_token!);
+                  } else if (block.name.startsWith("clover_")) {
+                    result = await callCloverAPI(
+                      block.name,
+                      block.input || {},
+                      user.clover_access_token!,
+                      user.clover_merchant_id!,
+                    );
+                  } else if (block.name.startsWith("grangou_")) {
+                    result = await callGrangouTool(block.name, block.input || {}, user.name);
+                  } else {
+                    result = { error: `Unknown tool: ${block.name}` };
+                  }
                 } catch (err) {
                   result = { error: (err as Error).message };
                 }
@@ -246,7 +447,6 @@ Deno.serve(async (req) => {
 
             messages.push({ role: "user", content: toolResults });
           } else {
-            // end_turn or other stop reason — done
             continueLoop = false;
           }
         }

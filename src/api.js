@@ -173,6 +173,15 @@ export const integrationAPI = {
   }),
 
   getStripeInsights: () => fetchEdge('restaurant-data/stripe-insights'),
+
+  connectClover: (code) => fetchEdge('restaurant-data/integrations/clover/connect', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  }),
+
+  disconnectClover: () => fetchEdge('restaurant-data/integrations/clover/disconnect', {
+    method: 'DELETE',
+  }),
 };
 
 // ============================================

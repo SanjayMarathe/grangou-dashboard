@@ -692,7 +692,7 @@ async function handleStripeInsights(restaurantId: number) {
 async function handleGetIntegrations(restaurantId: number) {
   const { data } = await b2b
     .from("restaraunts")
-    .select("stripe_connected, stripe_user_id")
+    .select("stripe_connected, stripe_user_id, clover_connected, clover_merchant_id")
     .eq("id", restaurantId)
     .single();
 
@@ -700,6 +700,10 @@ async function handleGetIntegrations(restaurantId: number) {
     stripe: {
       connected: data?.stripe_connected || false,
       stripe_user_id: data?.stripe_user_id || null,
+    },
+    clover: {
+      connected: data?.clover_connected || false,
+      merchant_id: data?.clover_merchant_id || null,
     },
   };
 }
@@ -753,6 +757,59 @@ async function handleStripeDisconnect(restaurantId: number) {
 }
 
 // ============================================
+// CLOVER INTEGRATION HANDLERS
+// ============================================
+
+async function handleCloverConnect(restaurantId: number, code: string) {
+  const cloverAppId = Deno.env.get("CLOVER_APP_ID")!;
+  const cloverAppSecret = Deno.env.get("CLOVER_APP_SECRET")!;
+
+  const tokenResponse = await fetch("https://www.clover.com/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: cloverAppId,
+      client_secret: cloverAppSecret,
+      code,
+    }),
+  });
+
+  const tokenData = await tokenResponse.json();
+  if (tokenData.error || !tokenData.access_token) {
+    throw new Error(tokenData.error_description || tokenData.error || "Clover token exchange failed");
+  }
+
+  const { access_token, merchant_id } = tokenData;
+
+  const { error } = await b2b
+    .from("restaraunts")
+    .update({
+      clover_access_token: access_token,
+      clover_merchant_id: merchant_id,
+      clover_connected: true,
+    })
+    .eq("id", restaurantId);
+
+  if (error) throw error;
+
+  return { success: true, merchant_id };
+}
+
+async function handleCloverDisconnect(restaurantId: number) {
+  const { error } = await b2b
+    .from("restaraunts")
+    .update({
+      clover_access_token: null,
+      clover_merchant_id: null,
+      clover_connected: false,
+    })
+    .eq("id", restaurantId);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+// ============================================
 // MAIN HANDLER
 // ============================================
 
@@ -783,6 +840,14 @@ Deno.serve(async (req) => {
     }
     if (fullPath.includes("/integrations/stripe/disconnect") && method === "DELETE") {
       return jsonResponse(await handleStripeDisconnect(restaurantId));
+    }
+    if (fullPath.includes("/integrations/clover/connect") && method === "POST") {
+      const body = await req.json();
+      if (!body.code) return jsonResponse({ error: "code is required" }, 400);
+      return jsonResponse(await handleCloverConnect(restaurantId, body.code));
+    }
+    if (fullPath.includes("/integrations/clover/disconnect") && method === "DELETE") {
+      return jsonResponse(await handleCloverDisconnect(restaurantId));
     }
 
     // GET-only endpoints (existing dashboard data)

@@ -1396,7 +1396,7 @@ const OrderLogging = ({ onBack }) => {
 };
 
 // Flavor Insights Component (with real data + time period toggle)
-const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected }) => {
+const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected, cloverConnected }) => {
   const [period, setPeriod] = useState('all');
   const [flavors, setFlavors] = useState(initialFlavors);
   const [stripeData, setStripeData] = useState(null);
@@ -1426,10 +1426,16 @@ const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected }) => 
     }
   };
 
-  // Use Stripe data if connected and available
+  // Stripe takes priority; Clover falls back to local orders
   const useStripe = stripeConnected && stripeData && stripeData.length > 0;
   const displayData = useStripe ? stripeData : flavors;
   const isEmpty = !displayData || displayData.length === 0;
+
+  const emptyMessage = stripeConnected
+    ? 'No succeeded charges found in your Stripe account'
+    : cloverConnected
+      ? 'Connect Stripe to see revenue insights, or log guest orders for order-based insights'
+      : 'Set up your menu and log guest orders to see insights';
 
   if (isEmpty) {
     return (
@@ -1441,9 +1447,7 @@ const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected }) => 
         <div className="text-center py-6">
           <Utensils size={32} className="text-gray-300 mx-auto mb-3" />
           <p className="text-sm text-gray-500 mb-1">No order data yet</p>
-          <p className="text-xs text-gray-400">
-            {stripeConnected ? 'No succeeded charges found in your Stripe account' : 'Set up your menu and log guest orders to see insights'}
-          </p>
+          <p className="text-xs text-gray-400">{emptyMessage}</p>
         </div>
       </div>
     );
@@ -1845,8 +1849,9 @@ const generateCSV = (dashboardData) => {
 
 // Quick Actions Component
 // Integrations Page Component
-const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect }) => {
+const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, cloverConnected, cloverMerchantId, onCloverDisconnect }) => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isCloverDisconnecting, setIsCloverDisconnecting] = useState(false);
 
   const handleConnectStripe = () => {
     const clientId = process.env.REACT_APP_STRIPE_CLIENT_ID || '';
@@ -1867,12 +1872,32 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect })
     }
   };
 
+  const handleConnectClover = () => {
+    const appId = process.env.REACT_APP_CLOVER_APP_ID || '';
+    const redirectUri = encodeURIComponent(window.location.origin);
+    const cloverOAuthUrl = `https://www.clover.com/oauth/authorize?client_id=${appId}&response_type=code&state=clover_oauth&redirect_uri=${redirectUri}`;
+    window.location.href = cloverOAuthUrl;
+  };
+
+  const handleCloverDisconnect = async () => {
+    setIsCloverDisconnecting(true);
+    try {
+      await integrationAPI.disconnectClover();
+      onCloverDisconnect();
+    } catch (err) {
+      console.error('Failed to disconnect Clover:', err);
+    } finally {
+      setIsCloverDisconnecting(false);
+    }
+  };
+
   return (
     <div className="p-8 pb-12">
         <h2 className="text-[32px] font-bold text-[#222222] mb-1">Integrations</h2>
         <p className="text-gray-500 mb-8">Connect your business tools to get the most out of Grangou</p>
 
-        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg">
+        {/* Stripe Card */}
+        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg mb-4">
           <div className="flex items-center gap-4 mb-4">
             <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center">
               <img src="/stripe.png" alt="Stripe" className="w-full h-full object-contain" />
@@ -1913,14 +1938,57 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect })
             </button>
           )}
         </div>
+
+        {/* Clover Card */}
+        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-[#1B8B47]/10">
+              <img src="/clover.png" alt="Clover" className="w-full h-full object-contain" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-[#222222]">Clover</h3>
+              <p className="text-sm text-gray-500">POS system & inventory insights</p>
+            </div>
+            {cloverConnected && (
+              <span className="px-3 py-1 bg-[#06D6A0]/10 text-[#06D6A0] text-xs font-semibold rounded-full">
+                Connected
+              </span>
+            )}
+          </div>
+
+          {cloverConnected && cloverMerchantId && (
+            <p className="text-xs text-gray-400 mb-4 font-mono">Merchant: {cloverMerchantId}</p>
+          )}
+
+          {cloverConnected ? (
+            <div className="flex gap-3">
+              <button
+                onClick={handleCloverDisconnect}
+                disabled={isCloverDisconnecting}
+                className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
+              >
+                {isCloverDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleConnectClover}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#1B8B47] hover:bg-[#166e39] text-white rounded-lg transition-colors text-sm font-semibold"
+            >
+              <Link size={16} />
+              Connect Clover
+            </button>
+          )}
+        </div>
     </div>
   );
 };
 
-// Chatbot Panel Component (floating, Stripe-powered)
+// Chatbot Panel Component (floating, restaurant management copilot)
 const ChatbotPanel = ({ isOpen, onClose }) => {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: "Hi! I'm Gou, your AI financial assistant. Ask me anything about your Stripe account — revenue, charges, customers, and more." }
+    { role: 'assistant', content: "Hi! I'm Gou, your restaurant management copilot. I can help with Grangou guest insights, peak hours, ratings, and more. Connect Stripe or Clover in Integrations to unlock financial and POS data!" }
   ]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -1933,6 +2001,13 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
     stripe_list_payment_intents: 'Fetching payments',
     stripe_list_refunds: 'Fetching refunds',
     stripe_list_products: 'Fetching products',
+    clover_list_orders: 'Fetching Clover orders',
+    clover_list_payments: 'Fetching Clover payments',
+    clover_list_items: 'Fetching inventory',
+    clover_list_customers: 'Fetching Clover customers',
+    grangou_get_metrics: 'Fetching guest metrics',
+    grangou_get_recent_experiences: 'Fetching guest experiences',
+    grangou_get_peak_hours: 'Fetching peak hours',
   };
 
   useEffect(() => {
@@ -2092,7 +2167,7 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-            placeholder="Ask about your Stripe account..."
+            placeholder="Ask about your restaurant..."
             disabled={isStreaming}
             className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#FF3B3F] focus:border-transparent disabled:opacity-50"
           />
@@ -2146,6 +2221,8 @@ const Dashboard = () => {
   const [currentPage, setCurrentPage] = useState('dashboard'); // 'dashboard' | 'menu' | 'orders' | 'integrations'
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeUserId, setStripeUserId] = useState(null);
+  const [cloverConnected, setCloverConnected] = useState(false);
+  const [cloverMerchantId, setCloverMerchantId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
 
   const fetchDashboardData = async () => {
@@ -2164,6 +2241,8 @@ const Dashboard = () => {
       const status = await integrationAPI.getStatus();
       setStripeConnected(status.stripe?.connected || false);
       setStripeUserId(status.stripe?.stripe_user_id || null);
+      setCloverConnected(status.clover?.connected || false);
+      setCloverMerchantId(status.clover?.merchant_id || null);
     } catch (err) {
       console.error('Failed to fetch integration status:', err);
     }
@@ -2179,11 +2258,24 @@ const Dashboard = () => {
     loadData();
   }, []);
 
-  // Handle Stripe OAuth callback (?code=...)
+  // Handle OAuth callbacks (?code=... with optional ?state=clover_oauth)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
-    if (code) {
+    const state = params.get('state');
+    if (code && state === 'clover_oauth') {
+      window.history.replaceState({}, '', window.location.pathname);
+      integrationAPI.connectClover(code)
+        .then((result) => {
+          setCloverConnected(true);
+          setCloverMerchantId(result.merchant_id || null);
+          setCurrentPage('integrations');
+        })
+        .catch(err => {
+          console.error('Clover connect failed:', err);
+          alert('Clover connection failed: ' + err.message);
+        });
+    } else if (code) {
       window.history.replaceState({}, '', window.location.pathname);
       integrationAPI.connectStripe(code)
         .then((result) => {
@@ -2207,19 +2299,17 @@ const Dashboard = () => {
   // Sub-pages
   const floatingChat = (
     <>
-      {stripeConnected && (
-        <button
-          onClick={() => setChatOpen(prev => !prev)}
-          className="fixed bottom-6 right-6 bg-white hover:bg-gray-50 text-[#222222] shadow-xl hover:shadow-2xl transition-all flex items-center gap-2.5 px-3 py-2 border border-gray-200"
-          style={{ zIndex: 999, borderRadius: '999px 999px 4px 999px' }}
-          title="Ask Gou about your finances"
-        >
-          {chatOpen
-            ? <><X size={18} className="text-gray-500" /><span className="text-sm font-medium text-gray-700 pr-1">Close</span></>
-            : <><img src="/gou.png" alt="Gou" className="w-8 h-8 object-cover rounded-full" /><span className="text-sm font-medium text-gray-700 pr-1">Ask Gou</span></>
-          }
-        </button>
-      )}
+      <button
+        onClick={() => setChatOpen(prev => !prev)}
+        className="fixed bottom-6 right-6 bg-white hover:bg-gray-50 text-[#222222] shadow-xl hover:shadow-2xl transition-all flex items-center gap-2.5 px-3 py-2 border border-gray-200"
+        style={{ zIndex: 999, borderRadius: '999px 999px 4px 999px' }}
+        title="Ask Gou about your restaurant"
+      >
+        {chatOpen
+          ? <><X size={18} className="text-gray-500" /><span className="text-sm font-medium text-gray-700 pr-1">Close</span></>
+          : <><img src="/gou.png" alt="Gou" className="w-8 h-8 object-cover rounded-full" /><span className="text-sm font-medium text-gray-700 pr-1">Ask Gou</span></>
+        }
+      </button>
       <ChatbotPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
     </>
   );
@@ -2253,7 +2343,10 @@ const Dashboard = () => {
         <IntegrationsPage
           stripeConnected={stripeConnected}
           stripeUserId={stripeUserId}
-          onStripeDisconnect={() => { setStripeConnected(false); setStripeUserId(null); setChatOpen(false); }}
+          onStripeDisconnect={() => { setStripeConnected(false); setStripeUserId(null); }}
+          cloverConnected={cloverConnected}
+          cloverMerchantId={cloverMerchantId}
+          onCloverDisconnect={() => { setCloverConnected(false); setCloverMerchantId(null); }}
         />
       )}
       {currentPage === 'dashboard' && (
@@ -2282,7 +2375,7 @@ const Dashboard = () => {
                 <MatchTypeBreakdown matchTypeBreakdown={matchTypeBreakdown} />
               </div>
               <div className="space-y-6">
-                <FlavorInsights flavorInsights={flavorInsights} stripeConnected={stripeConnected} />
+                <FlavorInsights flavorInsights={flavorInsights} stripeConnected={stripeConnected} cloverConnected={cloverConnected} />
                 <QuickActions
                   onExportReport={handleExportReport}
                   onOpenMenu={() => setCurrentPage('menu')}
