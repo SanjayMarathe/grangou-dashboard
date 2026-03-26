@@ -173,6 +173,15 @@ export const integrationAPI = {
   }),
 
   getStripeInsights: () => fetchEdge('restaurant-data/stripe-insights'),
+
+  connectSquare: (code) => fetchEdge('restaurant-data/integrations/square/connect', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  }),
+
+  disconnectSquare: () => fetchEdge('restaurant-data/integrations/square/disconnect', {
+    method: 'DELETE',
+  }),
 };
 
 // ============================================
