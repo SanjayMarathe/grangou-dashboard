@@ -1849,9 +1849,14 @@ const generateCSV = (dashboardData) => {
 
 // Quick Actions Component
 // Integrations Page Component
-const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, cloverConnected, cloverMerchantId, onCloverDisconnect }) => {
-  const [isDisconnecting, setIsDisconnecting] = useState(false);
+const IntegrationsPage = ({
+  stripeConnected, stripeUserId, onStripeDisconnect,
+  cloverConnected, cloverMerchantId, onCloverDisconnect,
+  squareConnected, squareMerchantId, onSquareDisconnect
+}) => {
+  const [isStripeDisconnecting, setIsStripeDisconnecting] = useState(false);
   const [isCloverDisconnecting, setIsCloverDisconnecting] = useState(false);
+  const [isSquareDisconnecting, setIsSquareDisconnecting] = useState(false);
 
   const handleConnectStripe = () => {
     const clientId = process.env.REACT_APP_STRIPE_CLIENT_ID || '';
@@ -1860,15 +1865,34 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, c
     window.location.href = stripeOAuthUrl;
   };
 
-  const handleDisconnect = async () => {
-    setIsDisconnecting(true);
+  const handleStripeDisconnect = async () => {
+    setIsStripeDisconnecting(true);
     try {
       await integrationAPI.disconnectStripe();
       onStripeDisconnect();
     } catch (err) {
       console.error('Failed to disconnect Stripe:', err);
     } finally {
-      setIsDisconnecting(false);
+      setIsStripeDisconnecting(false);
+    }
+  };
+
+  const handleConnectSquare = () => {
+    const appId = process.env.REACT_APP_SQUARE_APP_ID || '';
+    const redirectUri = window.location.origin;
+    const squareOAuthUrl = `https://connect.squareup.com/oauth2/authorize?client_id=${appId}&scope=ORDERS_READ+PAYMENTS_READ+CUSTOMERS_READ+ITEMS_READ+INVENTORY_READ&session=false&state=square_oauth&redirect_uri=${encodeURIComponent(redirectUri)}`;
+    window.location.href = squareOAuthUrl;
+  };
+
+  const handleSquareDisconnect = async () => {
+    setIsSquareDisconnecting(true);
+    try {
+      await integrationAPI.disconnectSquare();
+      onSquareDisconnect();
+    } catch (err) {
+      console.error('Failed to disconnect Square:', err);
+    } finally {
+      setIsSquareDisconnecting(false);
     }
   };
 
@@ -1920,11 +1944,11 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, c
           {stripeConnected ? (
             <div className="flex gap-3">
               <button
-                onClick={handleDisconnect}
-                disabled={isDisconnecting}
+                onClick={handleStripeDisconnect}
+                disabled={isStripeDisconnecting}
                 className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
               >
-                {isDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
+                {isStripeDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
                 Disconnect
               </button>
             </div>
@@ -1940,7 +1964,7 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, c
         </div>
 
         {/* Clover Card */}
-        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg">
+        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg mb-4">
           <div className="flex items-center gap-4 mb-4">
             <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-[#1B8B47]/10">
               <img src="/clover.png" alt="Clover" className="w-full h-full object-contain" />
@@ -1981,6 +2005,49 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, c
             </button>
           )}
         </div>
+
+        {/* Square Card */}
+        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-black">
+              <svg viewBox="0 0 24 24" fill="white" width="28" height="28"><path d="M17.5 2h-11C5.1 2 4 3.1 4 4.4v15.2C4 20.9 5.1 22 6.5 22h11c1.4 0 2.5-1.1 2.5-2.4V4.4C20 3.1 18.9 2 17.5 2zm-1 16H7.5c-.3 0-.5-.2-.5-.5v-11c0-.3.2-.5.5-.5h9c.3 0 .5.2.5.5v11c0 .3-.2.5-.5.5z"/></svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-[#222222]">Square</h3>
+              <p className="text-sm text-gray-500">Point-of-sale, orders & in-restaurant payments</p>
+            </div>
+            {squareConnected && (
+              <span className="px-3 py-1 bg-[#06D6A0]/10 text-[#06D6A0] text-xs font-semibold rounded-full">
+                Connected
+              </span>
+            )}
+          </div>
+
+          {squareConnected && squareMerchantId && (
+            <p className="text-xs text-gray-400 mb-4 font-mono">Merchant: {squareMerchantId}</p>
+          )}
+
+          {squareConnected ? (
+            <div className="flex gap-3">
+              <button
+                onClick={handleSquareDisconnect}
+                disabled={isSquareDisconnecting}
+                className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
+              >
+                {isSquareDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleConnectSquare}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#006AFF] hover:bg-[#0055CC] text-white rounded-lg transition-colors text-sm font-semibold"
+            >
+              <Link size={16} />
+              Connect Square
+            </button>
+          )}
+        </div>
     </div>
   );
 };
@@ -1988,24 +2055,33 @@ const IntegrationsPage = ({ stripeConnected, stripeUserId, onStripeDisconnect, c
 // Chatbot Panel Component (floating, restaurant management copilot)
 const ChatbotPanel = ({ isOpen, onClose }) => {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: "Hi! I'm Gou, your restaurant management copilot. I can help with Grangou guest insights, peak hours, ratings, and more. Connect Stripe or Clover in Integrations to unlock financial and POS data!" }
+    { role: 'assistant', content: "Hi! I'm Gou, your restaurant management copilot. I can help with Grangou guest insights, peak hours, ratings, and more. Connect Stripe, Clover, or Square in Integrations to unlock financial and POS data!" }
   ]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef(null);
 
   const toolLabels = {
-    stripe_retrieve_balance: 'Fetching balance',
+    // Stripe tools
+    stripe_retrieve_balance: 'Fetching Stripe balance',
     stripe_list_charges: 'Fetching charges',
-    stripe_list_customers: 'Fetching customers',
+    stripe_list_customers: 'Fetching Stripe customers',
     stripe_list_payment_intents: 'Fetching payments',
     stripe_list_refunds: 'Fetching refunds',
     stripe_list_products: 'Fetching products',
+    // Clover tools
     clover_list_orders: 'Fetching Clover orders',
     clover_list_payments: 'Fetching Clover payments',
     clover_list_items: 'Fetching inventory',
     clover_list_customers: 'Fetching Clover customers',
-    grangou_get_metrics: 'Fetching guest metrics',
+    // Square tools
+    square_get_locations: 'Fetching locations',
+    square_list_orders: 'Fetching Square orders',
+    square_list_payments: 'Fetching Square payments',
+    square_list_customers: 'Fetching Square customers',
+    square_list_catalog: 'Fetching menu catalog',
+    // Grangou tools
+    grangou_get_metrics: 'Fetching Grangou metrics',
     grangou_get_recent_experiences: 'Fetching guest experiences',
     grangou_get_peak_hours: 'Fetching peak hours',
   };
@@ -2095,7 +2171,7 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
       <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-t-xl">
         <div>
           <p className="font-semibold text-white text-sm">Gou</p>
-          <p className="text-white/70 text-xs">Financial AI Assistant</p>
+          <p className="text-white/70 text-xs">Restaurant Management Copilot</p>
         </div>
         <button onClick={onClose} className="text-white/70 hover:text-white transition-colors">
           <X size={20} />
@@ -2223,6 +2299,8 @@ const Dashboard = () => {
   const [stripeUserId, setStripeUserId] = useState(null);
   const [cloverConnected, setCloverConnected] = useState(false);
   const [cloverMerchantId, setCloverMerchantId] = useState(null);
+  const [squareConnected, setSquareConnected] = useState(false);
+  const [squareMerchantId, setSquareMerchantId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
 
   const fetchDashboardData = async () => {
@@ -2243,6 +2321,8 @@ const Dashboard = () => {
       setStripeUserId(status.stripe?.stripe_user_id || null);
       setCloverConnected(status.clover?.connected || false);
       setCloverMerchantId(status.clover?.merchant_id || null);
+      setSquareConnected(status.square?.connected || false);
+      setSquareMerchantId(status.square?.square_merchant_id || null);
     } catch (err) {
       console.error('Failed to fetch integration status:', err);
     }
@@ -2258,35 +2338,47 @@ const Dashboard = () => {
     loadData();
   }, []);
 
-  // Handle OAuth callbacks (?code=... with optional ?state=clover_oauth)
+  // Handle OAuth callbacks — Stripe, Clover (?state=clover_oauth), Square (?state=square_oauth)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const state = params.get('state');
-    if (code && state === 'clover_oauth') {
+    if (code) {
       window.history.replaceState({}, '', window.location.pathname);
-      integrationAPI.connectClover(code)
-        .then((result) => {
-          setCloverConnected(true);
-          setCloverMerchantId(result.merchant_id || null);
-          setCurrentPage('integrations');
-        })
-        .catch(err => {
-          console.error('Clover connect failed:', err);
-          alert('Clover connection failed: ' + err.message);
-        });
-    } else if (code) {
-      window.history.replaceState({}, '', window.location.pathname);
-      integrationAPI.connectStripe(code)
-        .then((result) => {
-          setStripeConnected(true);
-          setStripeUserId(result.stripe_user_id || null);
-          setCurrentPage('integrations');
-        })
-        .catch(err => {
-          console.error('Stripe connect failed:', err);
-          alert('Stripe connection failed: ' + err.message);
-        });
+      if (state === 'clover_oauth') {
+        integrationAPI.connectClover(code)
+          .then((result) => {
+            setCloverConnected(true);
+            setCloverMerchantId(result.merchant_id || null);
+            setCurrentPage('integrations');
+          })
+          .catch(err => {
+            console.error('Clover connect failed:', err);
+            alert('Clover connection failed: ' + err.message);
+          });
+      } else if (state === 'square_oauth') {
+        integrationAPI.connectSquare(code)
+          .then((result) => {
+            setSquareConnected(true);
+            setSquareMerchantId(result.square_merchant_id || null);
+            setCurrentPage('integrations');
+          })
+          .catch(err => {
+            console.error('Square connect failed:', err);
+            alert('Square connection failed: ' + err.message);
+          });
+      } else {
+        integrationAPI.connectStripe(code)
+          .then((result) => {
+            setStripeConnected(true);
+            setStripeUserId(result.stripe_user_id || null);
+            setCurrentPage('integrations');
+          })
+          .catch(err => {
+            console.error('Stripe connect failed:', err);
+            alert('Stripe connection failed: ' + err.message);
+          });
+      }
     }
   }, []);
 
@@ -2303,7 +2395,7 @@ const Dashboard = () => {
         onClick={() => setChatOpen(prev => !prev)}
         className="fixed bottom-6 right-6 bg-white hover:bg-gray-50 text-[#222222] shadow-xl hover:shadow-2xl transition-all flex items-center gap-2.5 px-3 py-2 border border-gray-200"
         style={{ zIndex: 999, borderRadius: '999px 999px 4px 999px' }}
-        title="Ask Gou about your restaurant"
+        title="Ask Gou, your restaurant management copilot"
       >
         {chatOpen
           ? <><X size={18} className="text-gray-500" /><span className="text-sm font-medium text-gray-700 pr-1">Close</span></>
@@ -2347,6 +2439,9 @@ const Dashboard = () => {
           cloverConnected={cloverConnected}
           cloverMerchantId={cloverMerchantId}
           onCloverDisconnect={() => { setCloverConnected(false); setCloverMerchantId(null); }}
+          squareConnected={squareConnected}
+          squareMerchantId={squareMerchantId}
+          onSquareDisconnect={() => { setSquareConnected(false); setSquareMerchantId(null); }}
         />
       )}
       {currentPage === 'dashboard' && (

@@ -692,7 +692,7 @@ async function handleStripeInsights(restaurantId: number) {
 async function handleGetIntegrations(restaurantId: number) {
   const { data } = await b2b
     .from("restaraunts")
-    .select("stripe_connected, stripe_user_id, clover_connected, clover_merchant_id")
+    .select("stripe_connected, stripe_user_id, clover_connected, clover_merchant_id, square_connected, square_merchant_id")
     .eq("id", restaurantId)
     .single();
 
@@ -704,6 +704,10 @@ async function handleGetIntegrations(restaurantId: number) {
     clover: {
       connected: data?.clover_connected || false,
       merchant_id: data?.clover_merchant_id || null,
+    },
+    square: {
+      connected: data?.square_connected || false,
+      square_merchant_id: data?.square_merchant_id || null,
     },
   };
 }
@@ -749,6 +753,59 @@ async function handleStripeDisconnect(restaurantId: number) {
       stripe_access_token: null,
       stripe_user_id: null,
       stripe_connected: false,
+    })
+    .eq("id", restaurantId);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+async function handleSquareConnect(restaurantId: number, code: string) {
+  const squareAppId = Deno.env.get("SQUARE_APP_ID")!;
+  const squareAppSecret = Deno.env.get("SQUARE_APP_SECRET")!;
+
+  const tokenResponse = await fetch("https://connect.squareup.com/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Square-Version": "2024-01-18",
+    },
+    body: JSON.stringify({
+      client_id: squareAppId,
+      client_secret: squareAppSecret,
+      code,
+      grant_type: "authorization_code",
+    }),
+  });
+
+  const tokenData = await tokenResponse.json();
+  if (tokenData.errors) {
+    throw new Error(tokenData.errors[0]?.detail || "Square OAuth failed");
+  }
+
+  const { access_token, merchant_id } = tokenData;
+
+  const { error } = await b2b
+    .from("restaraunts")
+    .update({
+      square_access_token: access_token,
+      square_merchant_id: merchant_id,
+      square_connected: true,
+    })
+    .eq("id", restaurantId);
+
+  if (error) throw error;
+
+  return { success: true, square_merchant_id: merchant_id };
+}
+
+async function handleSquareDisconnect(restaurantId: number) {
+  const { error } = await b2b
+    .from("restaraunts")
+    .update({
+      square_access_token: null,
+      square_merchant_id: null,
+      square_connected: false,
     })
     .eq("id", restaurantId);
 
@@ -848,6 +905,14 @@ Deno.serve(async (req) => {
     }
     if (fullPath.includes("/integrations/clover/disconnect") && method === "DELETE") {
       return jsonResponse(await handleCloverDisconnect(restaurantId));
+    }
+    if (fullPath.includes("/integrations/square/connect") && method === "POST") {
+      const body = await req.json();
+      if (!body.code) return jsonResponse({ error: "code is required" }, 400);
+      return jsonResponse(await handleSquareConnect(restaurantId, body.code));
+    }
+    if (fullPath.includes("/integrations/square/disconnect") && method === "DELETE") {
+      return jsonResponse(await handleSquareDisconnect(restaurantId));
     }
 
     // GET-only endpoints (existing dashboard data)

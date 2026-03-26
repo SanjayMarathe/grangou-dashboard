@@ -182,6 +182,15 @@ export const integrationAPI = {
   disconnectClover: () => fetchEdge('restaurant-data/integrations/clover/disconnect', {
     method: 'DELETE',
   }),
+
+  connectSquare: (code) => fetchEdge('restaurant-data/integrations/square/connect', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  }),
+
+  disconnectSquare: () => fetchEdge('restaurant-data/integrations/square/disconnect', {
+    method: 'DELETE',
+  }),
 };
 
 // ============================================

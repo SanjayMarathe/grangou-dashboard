@@ -5,7 +5,7 @@ const b2bUrl = Deno.env.get("SUPABASE_URL")!;
 const b2bKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const b2b = createClient(b2bUrl, b2bKey);
 
-// Mobile app database (read-only, for Grangou tools)
+// Mobile app database (read-only) — for Grangou platform tools
 const mobileUrl = Deno.env.get("MOBILE_APP_URL") || "https://fnfeiitawuvgtxfpmmvg.supabase.co";
 const mobileKey = Deno.env.get("MOBILE_APP_SERVICE_KEY") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuZmVpaXRhd3V2Z3R4ZnBtbXZnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDg0NTU2OCwiZXhwIjoyMDc2NDIxNTY4fQ.z-Ac1WQYw0HypAWW_TUiqCcyoh2KBV7cJ1PbuyRjvlo";
 const mobile = createClient(mobileUrl, mobileKey);
@@ -25,9 +25,16 @@ function decodeToken(token: string): { userId: number; email: string } | null {
 }
 
 async function authenticate(req: Request): Promise<{
-  id: number; name: string; email: string;
-  stripe_access_token?: string; stripe_connected?: boolean;
-  clover_access_token?: string; clover_merchant_id?: string; clover_connected?: boolean;
+  id: number;
+  name: string;
+  email: string;
+  stripe_access_token?: string;
+  stripe_connected?: boolean;
+  clover_access_token?: string;
+  clover_merchant_id?: string;
+  clover_connected?: boolean;
+  square_access_token?: string;
+  square_connected?: boolean;
 } | null> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
@@ -37,7 +44,7 @@ async function authenticate(req: Request): Promise<{
 
   const { data } = await b2b
     .from("restaraunts")
-    .select("id, name, email, stripe_access_token, stripe_connected, clover_access_token, clover_merchant_id, clover_connected")
+    .select("id, name, email, stripe_access_token, stripe_connected, clover_access_token, clover_merchant_id, clover_connected, square_access_token, square_connected")
     .eq("id", payload.userId)
     .single();
 
@@ -45,7 +52,7 @@ async function authenticate(req: Request): Promise<{
 }
 
 // ============================================
-// STRIPE TOOL DEFINITIONS
+// TOOL DEFINITIONS
 // ============================================
 
 const STRIPE_TOOLS = [
@@ -106,10 +113,6 @@ const STRIPE_TOOLS = [
   },
 ];
 
-// ============================================
-// CLOVER TOOL DEFINITIONS
-// ============================================
-
 const CLOVER_TOOLS = [
   {
     name: "clover_list_orders",
@@ -153,35 +156,80 @@ const CLOVER_TOOLS = [
   },
 ];
 
-// ============================================
-// GRANGOU TOOL DEFINITIONS (always active)
-// ============================================
+const SQUARE_TOOLS = [
+  {
+    name: "square_get_locations",
+    description: "Get the restaurant's Square locations (stores/outlets). Call this first before listing orders.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "square_list_orders",
+    description: "List recent Square POS orders for the restaurant.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max orders to return (default 10)" },
+        location_id: { type: "string", description: "Square location ID (get from square_get_locations)" },
+      },
+    },
+  },
+  {
+    name: "square_list_payments",
+    description: "List recent Square payments/transactions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max payments to return (default 10)" },
+      },
+    },
+  },
+  {
+    name: "square_list_customers",
+    description: "List Square customer profiles.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max customers to return (default 10)" },
+      },
+    },
+  },
+  {
+    name: "square_list_catalog",
+    description: "List Square catalog items (menu items/products).",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max items to return (default 20)" },
+      },
+    },
+  },
+];
 
 const GRANGOU_TOOLS = [
   {
     name: "grangou_get_metrics",
-    description: "Get Grangou platform metrics: total completed matches, unique guests, and average guest rating for this restaurant",
+    description: "Get Grangou platform metrics for this restaurant: total unique guests, completed matches, average rating.",
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "grangou_get_recent_experiences",
-    description: "Get recent guest experiences and feedback from Grangou matches",
+    description: "Get recent guest match experiences with ratings and feedback from the Grangou app.",
     input_schema: {
       type: "object",
       properties: {
-        limit: { type: "number", description: "Number of recent experiences to return (default 5)" },
+        limit: { type: "number", description: "Max experiences to return (default 10)" },
       },
     },
   },
   {
     name: "grangou_get_peak_hours",
-    description: "Get peak hours data showing when the most Grangou guest matches occur",
+    description: "Get peak hours traffic data showing when the restaurant is busiest on Grangou (by UTC hour).",
     input_schema: { type: "object", properties: {}, required: [] },
   },
 ];
 
 // ============================================
-// STRIPE API CALLER
+// API CALLERS
 // ============================================
 
 async function callStripeAPI(
@@ -208,10 +256,6 @@ async function callStripeAPI(
   return response.json();
 }
 
-// ============================================
-// CLOVER API CALLER
-// ============================================
-
 async function callCloverAPI(
   toolName: string,
   input: Record<string, unknown>,
@@ -236,9 +280,54 @@ async function callCloverAPI(
   return response.json();
 }
 
-// ============================================
-// GRANGOU TOOL CALLER
-// ============================================
+async function callSquareAPI(
+  toolName: string,
+  input: Record<string, unknown>,
+  squareToken: string,
+): Promise<unknown> {
+  const headers = {
+    "Authorization": `Bearer ${squareToken}`,
+    "Square-Version": "2024-01-18",
+    "Content-Type": "application/json",
+  };
+  const base = "https://connect.squareup.com/v2";
+  const limit = input.limit || 10;
+
+  if (toolName === "square_get_locations") {
+    const response = await fetch(`${base}/locations`, { headers });
+    return response.json();
+  }
+
+  if (toolName === "square_list_orders") {
+    const searchBody: Record<string, unknown> = { limit };
+    if (input.location_id) {
+      searchBody.location_ids = [input.location_id];
+    }
+    const response = await fetch(`${base}/orders/search`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ query: {}, ...searchBody }),
+    });
+    return response.json();
+  }
+
+  if (toolName === "square_list_payments") {
+    const response = await fetch(`${base}/payments?limit=${limit}`, { headers });
+    return response.json();
+  }
+
+  if (toolName === "square_list_customers") {
+    const response = await fetch(`${base}/customers?limit=${limit}`, { headers });
+    return response.json();
+  }
+
+  if (toolName === "square_list_catalog") {
+    const response = await fetch(`${base}/catalog/list?limit=${limit}`, { headers });
+    return response.json();
+  }
+
+  throw new Error(`Unknown Square tool: ${toolName}`);
+}
 
 async function callGrangouTool(
   toolName: string,
@@ -340,15 +429,34 @@ Deno.serve(async (req) => {
   }
 
   const { message, history = [] } = body;
-  const encoder = new TextEncoder();
 
-  // Build active tools based on connected integrations
+  // Build active tool list based on connected integrations
   const activeTools = [...GRANGOU_TOOLS];
   if (user.stripe_connected && user.stripe_access_token) activeTools.push(...STRIPE_TOOLS);
   if (user.clover_connected && user.clover_access_token) activeTools.push(...CLOVER_TOOLS);
+  if (user.square_connected && user.square_access_token) activeTools.push(...SQUARE_TOOLS);
 
-  const stripeStatus = user.stripe_connected ? "connected" : "not connected";
-  const cloverStatus = user.clover_connected ? "connected" : "not connected";
+  const stripeStatus = user.stripe_connected
+    ? "Stripe (connected): payment processing, revenue, charges, customers, refunds, products."
+    : "Stripe (not connected): suggest connecting Stripe in the Integrations page for payment insights.";
+  const cloverStatus = user.clover_connected
+    ? "Clover POS (connected): POS orders, payments, inventory, customers."
+    : "Clover POS (not connected): suggest connecting Clover in the Integrations page for in-restaurant sales data.";
+  const squareStatus = user.square_connected
+    ? "Square (connected): POS orders, payments, customers, catalog, locations."
+    : "Square (not connected): suggest connecting Square in the Integrations page for in-restaurant sales data.";
+
+  const systemPrompt = `You are Gou, the AI restaurant management copilot for ${user.name} on the Grangou platform.
+
+You have access to the following data sources:
+- Grangou Platform (always available): guest match metrics, recent experiences, ratings, peak hours from the Grangou dining app.
+- ${stripeStatus}
+- ${cloverStatus}
+- ${squareStatus}
+
+Help the restaurant owner understand their business holistically — guest experience, revenue trends, peak times, and operational insights. Be concise, warm, and actionable. Format currency values clearly. When a data source is not connected, briefly explain what insights would become available if they connected it.`;
+
+  const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -375,16 +483,7 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               model: "claude-sonnet-4-6",
               max_tokens: 4096,
-              system: `You are Gou, the AI restaurant management copilot for ${user.name} on the Grangou platform.
-
-Data sources available:
-- Grangou Platform (always active): guest match metrics, experiences, ratings, peak hours
-- Stripe (${stripeStatus}): payment processing, revenue, charges, customers
-- Clover POS (${cloverStatus}): POS orders, payments, inventory, customers
-
-Help the owner understand their business holistically. Be concise and actionable.
-When a source is disconnected, mention what insights would be unlocked by connecting it.
-Format currency values clearly.`,
+              system: systemPrompt,
               tools: activeTools,
               messages,
             }),
@@ -427,6 +526,8 @@ Format currency values clearly.`,
                       user.clover_access_token!,
                       user.clover_merchant_id!,
                     );
+                  } else if (block.name.startsWith("square_")) {
+                    result = await callSquareAPI(block.name, block.input || {}, user.square_access_token!);
                   } else if (block.name.startsWith("grangou_")) {
                     result = await callGrangouTool(block.name, block.input || {}, user.name);
                   } else {
