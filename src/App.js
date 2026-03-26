@@ -25,7 +25,6 @@ import {
   ArrowLeft,
   ShoppingBag,
   Minus,
-  Link,
   Send,
   Zap
 } from 'lucide-react';
@@ -2235,8 +2234,9 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
                 return updated;
               });
             } else if (event.type === 'tool_result') {
+              const lastIdx = streamingToolStates.length - 1;
               streamingToolStates = streamingToolStates.map((t, i) =>
-                i === streamingToolStates.length - 1 ? { ...t, done: true } : t
+                i === lastIdx ? { ...t, done: true } : t
               );
               const toolSnap = [...streamingToolStates];
               setMessages(prev => {
@@ -2252,10 +2252,11 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
               });
             } else if (event.type === 'done') {
               if (toolCallCount > 0) {
+                const countSnap = toolCallCount;
                 const snapshot = [...toolCallsList];
                 setMessages(prev => {
                   const updated = [...prev];
-                  updated[updated.length - 1] = { ...updated[updated.length - 1], toolCalls: toolCallCount, toolCallsList: snapshot };
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], toolCalls: countSnap, toolCallsList: snapshot };
                   return updated;
                 });
               }
