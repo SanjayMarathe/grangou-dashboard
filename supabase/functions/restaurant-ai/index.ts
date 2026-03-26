@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// B2B database (grangou website)
+// B2B database (Grangou website)
 const b2bUrl = Deno.env.get("SUPABASE_URL")!;
 const b2bKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const b2b = createClient(b2bUrl, b2bKey);
@@ -549,6 +549,45 @@ Help the restaurant owner understand their business holistically — guest exper
             messages.push({ role: "user", content: toolResults });
           } else {
             continueLoop = false;
+
+            // Generate follow-up suggestions using a fast Haiku call
+            try {
+              // Extract the final assistant reply text and original user question
+              const finalReply = (data.content as { type: string; text?: string }[])
+                .filter((b) => b.type === "text" && b.text)
+                .map((b) => b.text)
+                .join("\n");
+
+              const originalQuestion = messages.find(
+                (m: { role: string; content: unknown }) => m.role === "user" && typeof m.content === "string"
+              )?.content as string || "";
+
+              const suggestResponse = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-api-key": anthropicApiKey,
+                  "anthropic-version": "2023-06-01",
+                },
+                body: JSON.stringify({
+                  model: "claude-haiku-4-5-20251001",
+                  max_tokens: 150,
+                  system: 'You suggest follow-up questions for a restaurant owner using a business dashboard. Return ONLY a JSON array of exactly 3 short strings (max 7 words each), no other text. Example: ["What are my peak hours?","Show last month revenue","Which items sell most?"]',
+                  messages: [
+                    { role: "user", content: originalQuestion },
+                    { role: "assistant", content: finalReply || "I checked your data." },
+                    { role: "user", content: "Suggest 3 follow-up questions I might ask next." },
+                  ],
+                }),
+              });
+              const suggestData = await suggestResponse.json();
+              const raw = (suggestData.content?.[0]?.text?.trim() || "[]")
+                .replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+              const suggestions = JSON.parse(raw);
+              if (Array.isArray(suggestions) && suggestions.length > 0) {
+                emit({ type: "suggestions", suggestions });
+              }
+            } catch { /* suggestions are best-effort */ }
           }
         }
       } catch (err) {

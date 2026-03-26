@@ -358,35 +358,8 @@ const AuthPage = () => {
 };
 
 // Header Component
-const SEARCHABLE_ITEMS = [
-  { label: 'Stripe', description: 'Payment processing & financial insights', action: 'integrations', icon: '/stripe.png' },
-];
-
 const Navbar = ({ onRefresh, isRefreshing, onOpenIntegrations, onNavigate }) => {
   const { logout } = useAuth();
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const searchRef = useRef(null);
-
-  useEffect(() => {
-    if (searchOpen) searchRef.current?.focus();
-  }, [searchOpen]);
-
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') { setSearchOpen(false); setQuery(''); } };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  const results = query.trim()
-    ? SEARCHABLE_ITEMS.filter(i => i.label.toLowerCase().includes(query.toLowerCase()) || i.description.toLowerCase().includes(query.toLowerCase()))
-    : [];
-
-  const handleSelect = (item) => {
-    setSearchOpen(false);
-    setQuery('');
-    if (item.action === 'integrations') onOpenIntegrations();
-  };
 
   return (
     <div className="sticky top-0 z-40 bg-white border-b border-gray-200">
@@ -394,56 +367,14 @@ const Navbar = ({ onRefresh, isRefreshing, onOpenIntegrations, onNavigate }) => 
         <div className="flex items-center gap-3">
           <GrangouLogo size={36} />
           <div>
-            <h1 className="font-bold text-[#222222] text-lg">grangou</h1>
+            <h1 className="font-bold text-[#222222] text-lg">Grangou</h1>
             <p className="text-xs text-gray-500">Restaurant Portal</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {/* Search */}
-          <div className="relative">
-            {searchOpen ? (
-              <div className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-white w-56 focus-within:ring-2 focus-within:ring-[#FF3B3F] focus-within:border-transparent">
-                <Search size={16} className="text-gray-400 shrink-0" />
-                <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="Search integrations..."
-                  className="text-sm outline-none w-full"
-                />
-                <button onClick={() => { setSearchOpen(false); setQuery(''); }}>
-                  <X size={14} className="text-gray-400 hover:text-gray-600" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setSearchOpen(true)}
-                className="p-2.5 bg-white rounded-lg text-gray-500 hover:text-[#222222] hover:shadow-md transition-all border border-gray-200"
-              >
-                <Search size={20} />
-              </button>
-            )}
-            {results.length > 0 && (
-              <div className="absolute top-full mt-1 right-0 w-64 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-50">
-                {results.map((item, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSelect(item)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#F4F4F4] transition-colors text-left"
-                  >
-                    <img src={item.icon} alt={item.label} className="w-6 h-6 object-contain" />
-                    <div>
-                      <p className="text-sm font-semibold text-[#222222]">{item.label}</p>
-                      <p className="text-xs text-gray-500">{item.description}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
           <button
             onClick={onOpenIntegrations}
-            className="flex items-center gap-2 px-4 py-2.5 text-gray-600 hover:text-[#635BFF] hover:bg-[#635BFF]/10 rounded-lg transition-colors text-sm border border-gray-200"
+            className="flex items-center gap-2 px-4 py-2.5 text-gray-600 hover:text-[#FF3B3F] hover:bg-[#FF3B3F]/10 rounded-lg transition-colors text-sm border border-gray-200"
           >
             <Zap size={16} />
             Integrations
@@ -1840,7 +1771,7 @@ const generateCSV = (dashboardData) => {
   const today = now.toISOString().split('T')[0];
   const slug = restaurantName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   link.href = url;
-  link.download = `grangou-report-${slug}-${today}.csv`;
+  link.download = `Grangou-report-${slug}-${today}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -1850,6 +1781,7 @@ const generateCSV = (dashboardData) => {
 // Quick Actions Component
 // Integrations Page Component
 const IntegrationsPage = ({
+  onBack,
   stripeConnected, stripeUserId, onStripeDisconnect,
   cloverConnected, cloverMerchantId, onCloverDisconnect,
   squareConnected, squareMerchantId, onSquareDisconnect
@@ -1857,6 +1789,36 @@ const IntegrationsPage = ({
   const [isStripeDisconnecting, setIsStripeDisconnecting] = useState(false);
   const [isCloverDisconnecting, setIsCloverDisconnecting] = useState(false);
   const [isSquareDisconnecting, setIsSquareDisconnecting] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
+  const [activeChip, setActiveChip] = useState('all');
+  const [drawerIntegration, setDrawerIntegration] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerAccountInfo, setDrawerAccountInfo] = useState(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+
+  const openDrawer = async (intg) => {
+    setDrawerIntegration(intg);
+    setDrawerAccountInfo(null);
+    setDrawerLoading(true);
+    // Trigger transition on next tick
+    requestAnimationFrame(() => setDrawerOpen(true));
+    try {
+      let info = null;
+      if (intg.key === 'stripe') info = await integrationAPI.getStripeAccount();
+      else if (intg.key === 'clover') info = await integrationAPI.getCloverAccount();
+      else if (intg.key === 'square') info = await integrationAPI.getSquareAccount();
+      setDrawerAccountInfo(info);
+    } catch {
+      setDrawerAccountInfo(null);
+    } finally {
+      setDrawerLoading(false);
+    }
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setTimeout(() => setDrawerIntegration(null), 300);
+  };
 
   const handleConnectStripe = () => {
     const clientId = process.env.REACT_APP_STRIPE_CLIENT_ID || '';
@@ -1898,8 +1860,7 @@ const IntegrationsPage = ({
 
   const handleConnectClover = () => {
     const appId = process.env.REACT_APP_CLOVER_APP_ID || '';
-    const redirectUri = encodeURIComponent(window.location.origin);
-    const cloverOAuthUrl = `https://www.clover.com/oauth/authorize?client_id=${appId}&response_type=code&state=clover_oauth&redirect_uri=${redirectUri}`;
+    const cloverOAuthUrl = `https://www.clover.com/oauth/authorize?client_id=${appId}`;
     window.location.href = cloverOAuthUrl;
   };
 
@@ -1915,139 +1876,266 @@ const IntegrationsPage = ({
     }
   };
 
+  const integrations = [
+    {
+      key: 'stripe',
+      label: 'Stripe',
+      domain: 'stripe.com',
+      description: 'Payment processing & financial insights',
+      logo: <img src="/stripe.png" alt="Stripe" className="w-full h-full object-contain" />,
+      connected: stripeConnected,
+      connecting: false,
+      disconnecting: isStripeDisconnecting,
+      onConnect: handleConnectStripe,
+      onDisconnect: handleStripeDisconnect,
+      meta: stripeConnected && stripeUserId ? `Account: ${stripeUserId}` : null,
+    },
+    {
+      key: 'clover',
+      label: 'Clover',
+      domain: 'clover.com',
+      description: 'POS system & inventory insights',
+      logo: (
+        <svg viewBox="0 0 56 56" width="32" height="32" fill="#1DA462">
+          <circle cx="16" cy="16" r="14"/><circle cx="40" cy="16" r="14"/>
+          <circle cx="16" cy="40" r="14"/><circle cx="40" cy="40" r="14"/>
+          <rect x="25" y="0" width="6" height="56" fill="white"/>
+          <rect x="0" y="25" width="56" height="6" fill="white"/>
+        </svg>
+      ),
+      connected: cloverConnected,
+      disconnecting: isCloverDisconnecting,
+      onConnect: handleConnectClover,
+      onDisconnect: handleCloverDisconnect,
+      meta: cloverConnected && cloverMerchantId ? `Merchant: ${cloverMerchantId}` : null,
+    },
+    {
+      key: 'square',
+      label: 'Square',
+      domain: 'squareup.com',
+      description: 'Point-of-sale, orders & in-restaurant payments',
+      logo: (
+        <svg viewBox="0 0 100 100" width="36" height="36">
+          <rect x="0" y="0" width="100" height="100" rx="18" fill="black"/>
+          <rect x="13" y="13" width="74" height="74" rx="12" fill="white"/>
+          <rect x="32" y="32" width="36" height="36" rx="7" fill="black"/>
+        </svg>
+      ),
+      connected: squareConnected,
+      disconnecting: isSquareDisconnecting,
+      onConnect: handleConnectSquare,
+      onDisconnect: handleSquareDisconnect,
+      meta: squareConnected && squareMerchantId ? `Merchant: ${squareMerchantId}` : null,
+    },
+  ];
+
+  const chipCategories = { all: null, payments: ['stripe'], pos: ['clover', 'square'] };
+
+  const visible = integrations.filter(i => {
+    const matchesQuery = !filterQuery.trim() ||
+      i.label.toLowerCase().includes(filterQuery.toLowerCase()) ||
+      i.description.toLowerCase().includes(filterQuery.toLowerCase());
+    const allowed = chipCategories[activeChip];
+    const matchesChip = !allowed || allowed.includes(i.key);
+    return matchesQuery && matchesChip;
+  });
+
   return (
-    <div className="p-8 pb-12">
-        <h2 className="text-[32px] font-bold text-[#222222] mb-1">Integrations</h2>
-        <p className="text-gray-500 mb-8">Connect your business tools to get the most out of Grangou</p>
+    <div className="p-8 pb-16">
 
-        {/* Stripe Card */}
-        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg mb-4">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center">
-              <img src="/stripe.png" alt="Stripe" className="w-full h-full object-contain" />
+      {/* Side Drawer */}
+      {drawerIntegration && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/20 z-50 transition-opacity duration-300"
+            style={{ opacity: drawerOpen ? 1 : 0 }}
+            onClick={closeDrawer}
+          />
+          <div
+            className="fixed right-0 top-0 h-full w-80 bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-out"
+            style={{ transform: drawerOpen ? 'translateX(0)' : 'translateX(100%)' }}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center overflow-hidden border border-gray-100">
+                  {drawerIntegration.logo}
+                </div>
+                <p className="font-bold text-[#222222]">{drawerIntegration.label}</p>
+              </div>
+              <button onClick={closeDrawer} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+                <X size={16} className="text-gray-500" />
+              </button>
             </div>
-            <div className="flex-1">
-              <h3 className="font-bold text-[#222222]">Stripe</h3>
-              <p className="text-sm text-gray-500">Payment processing & financial insights</p>
+
+            <div className="flex-1 p-6 flex flex-col gap-5 overflow-y-auto">
+              {/* Account info from API */}
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Account Details</p>
+                {drawerLoading ? (
+                  <div className="flex flex-col gap-2">
+                    {[1,2,3].map(i => (
+                      <div key={i} className="h-8 bg-gray-100 rounded-lg animate-pulse" />
+                    ))}
+                  </div>
+                ) : drawerAccountInfo && !drawerAccountInfo.error ? (
+                  <div className="flex flex-col gap-2">
+                    {[
+                      { label: 'Business', value: drawerAccountInfo.business_name || drawerAccountInfo.name },
+                      { label: 'Email', value: drawerAccountInfo.email },
+                      { label: 'Country', value: drawerAccountInfo.country },
+                      { label: 'Currency', value: drawerAccountInfo.currency },
+                      { label: 'Status', value: drawerAccountInfo.status || (drawerAccountInfo.charges_enabled != null ? (drawerAccountInfo.charges_enabled ? 'Active' : 'Restricted') : null) },
+                      { label: 'Phone', value: drawerAccountInfo.phone },
+                      { label: 'Account ID', value: drawerAccountInfo.account_id || drawerAccountInfo.merchant_id, mono: true },
+                    ].filter(r => r.value).map(row => (
+                      <div key={row.label} className="flex justify-between items-start gap-3 py-2 border-b border-gray-50 last:border-0">
+                        <span className="text-xs text-gray-400 shrink-0">{row.label}</span>
+                        <span className={`text-xs text-right text-[#222222] ${row.mono ? 'font-mono' : 'font-medium'} break-all`}>{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {drawerIntegration.meta && (
+                      <div className="flex justify-between items-center py-2 border-b border-gray-50">
+                        <span className="text-xs text-gray-400">ID</span>
+                        <span className="text-xs font-mono text-[#222222] break-all text-right">{drawerIntegration.meta.replace(/^.*?: /, '')}</span>
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">Could not load additional details.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Domain */}
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Domain</p>
+                <a href={`https://${drawerIntegration.domain}`} target="_blank" rel="noopener noreferrer" className="text-sm text-gray-600 hover:text-[#222222] hover:underline flex items-center gap-1">
+                  {drawerIntegration.domain}
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3.5 8.5l5-5M5 3.5h3.5V7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </a>
+              </div>
             </div>
-            {stripeConnected && (
-              <span className="px-3 py-1 bg-[#06D6A0]/10 text-[#06D6A0] text-xs font-semibold rounded-full">
-                Connected
-              </span>
-            )}
-          </div>
 
-          {stripeConnected && stripeUserId && (
-            <p className="text-xs text-gray-400 mb-4 font-mono">Account: {stripeUserId}</p>
-          )}
-
-          {stripeConnected ? (
-            <div className="flex gap-3">
+            <div className="p-6 border-t border-gray-100">
               <button
-                onClick={handleStripeDisconnect}
-                disabled={isStripeDisconnecting}
-                className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
+                onClick={async () => {
+                  await drawerIntegration.onDisconnect();
+                  closeDrawer();
+                }}
+                disabled={drawerIntegration.disconnecting}
+                className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {isStripeDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
+                {drawerIntegration.disconnecting && <Loader2 size={14} className="animate-spin" />}
                 Disconnect
               </button>
             </div>
-          ) : (
-            <button
-              onClick={handleConnectStripe}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#635BFF] hover:bg-[#5851e0] text-white rounded-lg transition-colors text-sm font-semibold"
-            >
-              <Link size={16} />
-              Connect Stripe
-            </button>
-          )}
-        </div>
+          </div>
+        </>
+      )}
 
-        {/* Clover Card */}
-        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg mb-4">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-[#1B8B47]/10">
-              <img src="/clover.png" alt="Clover" className="w-full h-full object-contain" />
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-1">
+        <button onClick={onBack} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <ArrowLeft size={18} className="text-gray-500" />
+        </button>
+        <GrangouLogo size={28} />
+        <h2 className="text-2xl font-bold text-[#222222]">Integrations</h2>
+      </div>
+      <p className="text-gray-500 text-sm mb-8 ml-[52px]">Connect your business tools to get the most out of Grangou</p>
+
+      {/* Search + chips */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-8 items-center">
+        <div className="relative w-full sm:max-w-xs">
+          <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+            <Search size={15} className="text-gray-400" />
+          </div>
+          <input
+            value={filterQuery}
+            onChange={e => setFilterQuery(e.target.value)}
+            placeholder="Search integrations..."
+            className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all placeholder:text-gray-400"
+          />
+        </div>
+        <div className="flex gap-2">
+          {[{ key: 'all', label: 'All' }, { key: 'payments', label: 'Payments' }, { key: 'pos', label: 'POS' }].map(c => (
+            <button
+              key={c.key}
+              onClick={() => setActiveChip(c.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors border ${
+                activeChip === c.key
+                  ? 'bg-[#222222] text-white border-[#222222]'
+                  : 'bg-white text-gray-500 border-gray-200 hover:text-[#222222] hover:border-gray-400'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {visible.map(intg => (
+          <div
+            key={intg.key}
+            className="bg-white rounded-lg p-6 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between h-[260px]"
+          >
+            <div>
+              <div className="flex justify-between items-start mb-4">
+                <div className="w-12 h-12 bg-gray-50 rounded-lg flex items-center justify-center overflow-hidden border border-gray-100">
+                  {intg.logo}
+                </div>
+                {intg.connected && (
+                  <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-500 text-xs font-semibold">
+                    Connected
+                  </span>
+                )}
+              </div>
+              <h3 className="font-bold text-[#222222] mb-1">{intg.label}</h3>
+              <p className="text-gray-500 text-sm leading-relaxed">{intg.description}</p>
             </div>
-            <div className="flex-1">
-              <h3 className="font-bold text-[#222222]">Clover</h3>
-              <p className="text-sm text-gray-500">POS system & inventory insights</p>
-            </div>
-            {cloverConnected && (
-              <span className="px-3 py-1 bg-[#06D6A0]/10 text-[#06D6A0] text-xs font-semibold rounded-full">
-                Connected
-              </span>
+            {intg.connected ? (
+              <button
+                onClick={() => openDrawer(intg)}
+                className="w-full py-2.5 rounded-lg border border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors"
+              >
+                Manage
+              </button>
+            ) : (
+              <button
+                onClick={intg.onConnect}
+                className="w-full py-2.5 rounded-lg bg-[#222222] hover:bg-black text-white font-semibold text-sm transition-all shadow-sm"
+              >
+                Connect
+              </button>
             )}
           </div>
+        ))}
 
-          {cloverConnected && cloverMerchantId && (
-            <p className="text-xs text-gray-400 mb-4 font-mono">Merchant: {cloverMerchantId}</p>
-          )}
-
-          {cloverConnected ? (
-            <div className="flex gap-3">
-              <button
-                onClick={handleCloverDisconnect}
-                disabled={isCloverDisconnecting}
-                className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
-              >
-                {isCloverDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleConnectClover}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#1B8B47] hover:bg-[#166e39] text-white rounded-lg transition-colors text-sm font-semibold"
-            >
-              <Link size={16} />
-              Connect Clover
-            </button>
-          )}
-        </div>
-
-        {/* Square Card */}
-        <div className="bg-white rounded-lg shadow-card p-6 max-w-lg">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-black">
-              <svg viewBox="0 0 24 24" fill="white" width="28" height="28"><path d="M17.5 2h-11C5.1 2 4 3.1 4 4.4v15.2C4 20.9 5.1 22 6.5 22h11c1.4 0 2.5-1.1 2.5-2.4V4.4C20 3.1 18.9 2 17.5 2zm-1 16H7.5c-.3 0-.5-.2-.5-.5v-11c0-.3.2-.5.5-.5h9c.3 0 .5.2.5.5v11c0 .3-.2.5-.5.5z"/></svg>
-            </div>
-            <div className="flex-1">
-              <h3 className="font-bold text-[#222222]">Square</h3>
-              <p className="text-sm text-gray-500">Point-of-sale, orders & in-restaurant payments</p>
-            </div>
-            {squareConnected && (
-              <span className="px-3 py-1 bg-[#06D6A0]/10 text-[#06D6A0] text-xs font-semibold rounded-full">
-                Connected
-              </span>
-            )}
+        {/* Request Integration card */}
+        <div className="bg-white rounded-lg p-6 shadow-card flex flex-col justify-center items-center text-center gap-3 h-[260px] border border-dashed border-gray-200">
+          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+            <Plus size={18} className="text-gray-500" />
           </div>
-
-          {squareConnected && squareMerchantId && (
-            <p className="text-xs text-gray-400 mb-4 font-mono">Merchant: {squareMerchantId}</p>
-          )}
-
-          {squareConnected ? (
-            <div className="flex gap-3">
-              <button
-                onClick={handleSquareDisconnect}
-                disabled={isSquareDisconnecting}
-                className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm disabled:opacity-50"
-              >
-                {isSquareDisconnecting ? <Loader2 size={14} className="animate-spin" /> : null}
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleConnectSquare}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#006AFF] hover:bg-[#0055CC] text-white rounded-lg transition-colors text-sm font-semibold"
-            >
-              <Link size={16} />
-              Connect Square
-            </button>
-          )}
+          <div>
+            <h4 className="font-bold text-[#222222] mb-1">Request Integration</h4>
+            <p className="text-gray-500 text-xs leading-relaxed">Don't see your tool? Let us know what we should build next.</p>
+          </div>
+          <a
+            href="mailto:grangou@grangouapp.com"
+            className="text-sm font-semibold text-gray-700 hover:underline"
+          >
+            Submit Request
+          </a>
         </div>
+
+        {visible.length === 0 && (
+          <div className="col-span-3 py-16 text-center text-gray-400 text-sm">
+            No integrations match your search.
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -2059,6 +2147,7 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
   ]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [expandedToolIdx, setExpandedToolIdx] = useState(null);
   const messagesEndRef = useRef(null);
 
   const toolLabels = {
@@ -2090,16 +2179,22 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || isStreaming) return;
+  const sendMessage = async (text) => {
+    const content = (text || input).trim();
+    if (!content || isStreaming) return;
 
-    const userMessage = { role: 'user', content: input.trim() };
-    const history = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+    const userMessage = { role: 'user', content };
+    const history = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(({ role, content }) => ({ role, content }));
     setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '' }]);
     setInput('');
     setIsStreaming(true);
 
     let assistantContent = '';
+    let toolCallCount = 0;
+    let toolCallsList = [];
+    let streamingToolStates = []; // { name, done }[]
 
     try {
       const streamBody = await aiAPI.chat(userMessage.content, history);
@@ -2130,20 +2225,40 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
                 return updated;
               });
             } else if (event.type === 'tool_use') {
+              toolCallCount++;
+              toolCallsList.push(event.tool_name);
+              streamingToolStates = [...streamingToolStates, { name: event.tool_name, done: false }];
+              const toolSnap = [...streamingToolStates];
               setMessages(prev => {
                 const updated = [...prev];
-                // insert tool message before the last empty assistant bubble
-                updated.splice(updated.length - 1, 0, { role: 'tool', tool_name: event.tool_name, status: 'loading' });
+                updated[updated.length - 1] = { ...updated[updated.length - 1], streamingToolStates: toolSnap };
                 return updated;
               });
             } else if (event.type === 'tool_result') {
+              streamingToolStates = streamingToolStates.map((t, i) =>
+                i === streamingToolStates.length - 1 ? { ...t, done: true } : t
+              );
+              const toolSnap = [...streamingToolStates];
               setMessages(prev => {
                 const updated = [...prev];
-                const idx = updated.findLastIndex(m => m.role === 'tool' && m.status === 'loading');
-                if (idx !== -1) updated[idx] = { ...updated[idx], status: 'done' };
+                updated[updated.length - 1] = { ...updated[updated.length - 1], streamingToolStates: toolSnap };
+                return updated;
+              });
+            } else if (event.type === 'suggestions') {
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...updated[updated.length - 1], suggestions: event.suggestions };
                 return updated;
               });
             } else if (event.type === 'done') {
+              if (toolCallCount > 0) {
+                const snapshot = [...toolCallsList];
+                setMessages(prev => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], toolCalls: toolCallCount, toolCallsList: snapshot };
+                  return updated;
+                });
+              }
               setIsStreaming(false);
             }
           } catch { /* skip malformed lines */ }
@@ -2167,6 +2282,21 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
       className="fixed bottom-24 right-6 bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col"
       style={{ width: '384px', height: '520px', zIndex: 1000 }}
     >
+      <style>{`
+        @keyframes gou-shine {
+          0% { background-position: 200% center; }
+          100% { background-position: -200% center; }
+        }
+        .gou-shimmer {
+          background: linear-gradient(90deg, #FF3B3F 0%, #FF8C42 30%, #FFD700 50%, #FF8C42 70%, #FF3B3F 100%);
+          background-size: 200% auto;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: gou-shine 2s linear infinite;
+          font-weight: 500;
+        }
+      `}</style>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-t-xl">
         <div>
@@ -2181,52 +2311,93 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, idx) => (
-          <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {msg.role === 'tool' ? (
-              <div className="flex items-center gap-2 bg-[#FF6B00]/10 px-3 py-2 rounded-lg text-xs text-[#FF6B00]">
-                {msg.status === 'loading' ? (
-                  <Loader2 size={12} className="animate-spin shrink-0" />
-                ) : (
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0"><path d="M2 6l3 3 5-5" stroke="#FF6B00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                )}
-                {toolLabels[msg.tool_name] || msg.tool_name}{msg.status === 'loading' ? '...' : ''}
-              </div>
-            ) : (
+          <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+            {msg.role !== 'tool' && (
               <div className={`max-w-[80%] px-4 py-2.5 rounded-xl text-sm leading-relaxed ${
                 msg.role === 'user'
                   ? 'bg-[#FF3B3F] text-white rounded-br-sm'
                   : 'bg-[#F4F4F4] text-[#222222] rounded-bl-sm'
               }`}>
                 {msg.content ? (
-                  <div className="space-y-1">
-                    {msg.content.split('\n').map((line, i) => {
-                      const renderInline = (text) => {
-                        const parts = text.split(/(\*\*[^*]+\*\*)/g);
-                        return parts.map((part, j) =>
-                          /^\*\*[^*]+\*\*$/.test(part)
-                            ? <strong key={j}>{part.slice(2, -2)}</strong>
-                            : part
-                        );
-                      };
-                      if (/^#{1,3} /.test(line)) {
-                        return <p key={i} className="font-bold">{renderInline(line.replace(/^#{1,3} /, ''))}</p>;
-                      }
-                      if (/^[-*] /.test(line)) {
-                        return <p key={i} className="flex gap-1.5"><span>•</span><span>{renderInline(line.replace(/^[-*] /, ''))}</span></p>;
-                      }
-                      if (/^\d+\. /.test(line)) {
-                        return <p key={i} className="flex gap-1.5"><span className="shrink-0">{line.match(/^\d+/)[0]}.</span><span>{renderInline(line.replace(/^\d+\. /, ''))}</span></p>;
-                      }
-                      if (line.trim() === '') return <div key={i} className="h-1" />;
-                      return <p key={i}>{renderInline(line)}</p>;
-                    })}
-                  </div>
+                  <>
+                    <div className="space-y-1">
+                      {msg.content.split('\n').map((line, i) => {
+                        const renderInline = (text) => {
+                          const parts = text.split(/(\*\*[^*]+\*\*)/g);
+                          return parts.map((part, j) =>
+                            /^\*\*[^*]+\*\*$/.test(part)
+                              ? <strong key={j}>{part.slice(2, -2)}</strong>
+                              : part
+                          );
+                        };
+                        if (/^#{1,3} /.test(line)) {
+                          return <p key={i} className="font-bold">{renderInline(line.replace(/^#{1,3} /, ''))}</p>;
+                        }
+                        if (/^[-*] /.test(line)) {
+                          return <p key={i} className="flex gap-1.5"><span>•</span><span>{renderInline(line.replace(/^[-*] /, ''))}</span></p>;
+                        }
+                        if (/^\d+\. /.test(line)) {
+                          return <p key={i} className="flex gap-1.5"><span className="shrink-0">{line.match(/^\d+/)[0]}.</span><span>{renderInline(line.replace(/^\d+\. /, ''))}</span></p>;
+                        }
+                        if (line.trim() === '') return <div key={i} className="h-1" />;
+                        return <p key={i}>{renderInline(line)}</p>;
+                      })}
+                    </div>
+                  </>
                 ) : (isStreaming && idx === messages.length - 1 ? (
-                  <span className="flex items-center gap-1.5">
-                    <Loader2 size={12} className="animate-spin" />
-                    <span className="text-gray-400 text-xs">Thinking...</span>
-                  </span>
+                  <div className="flex flex-col gap-1">
+                    {(!msg.streamingToolStates || msg.streamingToolStates.length === 0) ? (
+                      <span className="flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin text-gray-400" />
+                        <span className="gou-shimmer text-xs">Generating...</span>
+                      </span>
+                    ) : (
+                      msg.streamingToolStates.map((tool, i) => (
+                        <span key={i} className="flex items-center gap-1.5">
+                          {!tool.done
+                            ? <Loader2 size={10} className="animate-spin text-gray-400 shrink-0" />
+                            : <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className="shrink-0"><path d="M2 6l3 3 5-5" stroke="#06D6A0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          }
+                          <span className="gou-shimmer text-xs">{toolLabels[tool.name] || tool.name}</span>
+                        </span>
+                      ))
+                    )}
+                  </div>
                 ) : '')}
+              </div>
+            )}
+            {msg.role === 'assistant' && msg.toolCalls > 0 && (
+              <div className="mt-1 px-1">
+                <button
+                  onClick={() => setExpandedToolIdx(expandedToolIdx === idx ? null : idx)}
+                  className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  {msg.toolCalls} tool call{msg.toolCalls > 1 ? 's' : ''}
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" style={{ transform: expandedToolIdx === idx ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}><path d="M1 2.5l3 3 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                {expandedToolIdx === idx && (
+                  <div className="mt-1 flex flex-col gap-0.5 pl-1">
+                    {(msg.toolCallsList || []).map((name, i) => (
+                      <span key={i} className="text-[10px] text-gray-400">
+                        {i + 1}. {toolLabels[name] || name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {msg.role === 'assistant' && msg.suggestions?.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5 max-w-[80%]">
+                {msg.suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => sendMessage(s)}
+                    className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 text-xs rounded-full hover:border-[#FF3B3F] hover:text-[#FF3B3F] transition-colors text-left"
+                  >
+                    {s}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -2345,11 +2516,13 @@ const Dashboard = () => {
     const state = params.get('state');
     if (code) {
       window.history.replaceState({}, '', window.location.pathname);
-      if (state === 'clover_oauth') {
-        integrationAPI.connectClover(code)
+      const merchantId = params.get('merchant_id');
+      if (merchantId) {
+        // Clover callback — includes merchant_id, no state param
+        integrationAPI.connectClover(code, merchantId)
           .then((result) => {
             setCloverConnected(true);
-            setCloverMerchantId(result.merchant_id || null);
+            setCloverMerchantId(merchantId || result.merchant_id || null);
             setCurrentPage('integrations');
           })
           .catch(err => {
@@ -2357,7 +2530,7 @@ const Dashboard = () => {
             alert('Clover connection failed: ' + err.message);
           });
       } else if (state === 'square_oauth') {
-        integrationAPI.connectSquare(code)
+        integrationAPI.connectSquare(code, window.location.origin)
           .then((result) => {
             setSquareConnected(true);
             setSquareMerchantId(result.square_merchant_id || null);
@@ -2433,6 +2606,7 @@ const Dashboard = () => {
       )}
       {currentPage === 'integrations' && (
         <IntegrationsPage
+          onBack={() => setCurrentPage('dashboard')}
           stripeConnected={stripeConnected}
           stripeUserId={stripeUserId}
           onStripeDisconnect={() => { setStripeConnected(false); setStripeUserId(null); }}

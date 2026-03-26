@@ -174,23 +174,27 @@ export const integrationAPI = {
 
   getStripeInsights: () => fetchEdge('restaurant-data/stripe-insights'),
 
-  connectClover: (code) => fetchEdge('restaurant-data/integrations/clover/connect', {
+  connectClover: (code, merchantId) => fetchEdge('restaurant-data/integrations/clover/connect', {
     method: 'POST',
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, merchant_id: merchantId }),
   }),
 
   disconnectClover: () => fetchEdge('restaurant-data/integrations/clover/disconnect', {
     method: 'DELETE',
   }),
 
-  connectSquare: (code) => fetchEdge('restaurant-data/integrations/square/connect', {
+  connectSquare: (code, redirectUri) => fetchEdge('restaurant-data/integrations/square/connect', {
     method: 'POST',
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
   }),
 
   disconnectSquare: () => fetchEdge('restaurant-data/integrations/square/disconnect', {
     method: 'DELETE',
   }),
+
+  getStripeAccount: () => fetchEdge('restaurant-data/integrations/stripe/account'),
+  getSquareAccount: () => fetchEdge('restaurant-data/integrations/square/account'),
+  getCloverAccount: () => fetchEdge('restaurant-data/integrations/clover/account'),
 };
 
 // ============================================
