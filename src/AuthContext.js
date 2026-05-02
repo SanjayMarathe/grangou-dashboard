@@ -3,15 +3,37 @@
  * Provides auth state and methods to all components
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI } from './api';
 
 const AuthContext = createContext(null);
 
+/** Derive entitlement when API omits it (e.g. older Edge deploy). */
+export function deriveEntitlement(user) {
+  if (!user) {
+    return { canUseDashboard: false, trialEndsAt: null, licensed: false };
+  }
+  const licensed = user.license_activated_at != null;
+  const trialEndMs = user.trial_ends_at ? new Date(user.trial_ends_at).getTime() : 0;
+  const inTrial = !!user.trial_ends_at && Date.now() < trialEndMs;
+  return {
+    canUseDashboard: licensed || inTrial,
+    trialEndsAt: user.trial_ends_at,
+    licensed,
+  };
+}
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [entitlement, setEntitlement] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const applyAuthPayload = useCallback((data) => {
+    setUser(data.user);
+    setEntitlement(data.entitlement ?? deriveEntitlement(data.user));
+    setIsAuthenticated(true);
+  }, []);
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -21,12 +43,11 @@ export const AuthProvider = ({ children }) => {
       if (token) {
         try {
           const data = await authAPI.verify();
-          setUser(data.user);
-          setIsAuthenticated(true);
+          applyAuthPayload(data);
         } catch (error) {
-          // Token is invalid, clear it
           localStorage.removeItem('authToken');
           setUser(null);
+          setEntitlement(null);
           setIsAuthenticated(false);
         }
       }
@@ -35,17 +56,42 @@ export const AuthProvider = ({ children }) => {
     };
 
     checkAuth();
-  }, []);
+  }, [applyAuthPayload]);
 
   const login = async (email, password) => {
     try {
       const data = await authAPI.login(email, password);
-      setUser(data.user);
-      setIsAuthenticated(true);
+      applyAuthPayload(data);
       return { success: true, user: data.user };
     } catch (error) {
       return { success: false, error: error.message };
     }
+  };
+
+  const register = async (formData) => {
+    try {
+      const data = await authAPI.register(formData);
+      applyAuthPayload(data);
+      return { success: true, user: data.user };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  /** Re-fetch user + entitlement from verify (e.g. after trial expires mid-session). */
+  const refreshSession = async () => {
+    const data = await authAPI.verify();
+    applyAuthPayload(data);
+    return data;
+  };
+
+  const activateLicense = async (code) => {
+    const data = await authAPI.activateLicense(code);
+    applyAuthPayload({
+      user: data.user,
+      entitlement: data.entitlement ?? deriveEntitlement(data.user),
+    });
+    return { success: true };
   };
 
   const logout = async () => {
@@ -55,16 +101,24 @@ export const AuthProvider = ({ children }) => {
       console.error('Logout error:', error);
     } finally {
       setUser(null);
+      setEntitlement(null);
       setIsAuthenticated(false);
     }
   };
 
+  const canUseDashboard = entitlement?.canUseDashboard ?? false;
+
   const value = {
     user,
+    entitlement,
+    canUseDashboard,
     isAuthenticated,
     isLoading,
     login,
+    register,
     logout,
+    refreshSession,
+    activateLicense,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

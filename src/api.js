@@ -27,7 +27,12 @@ const fetchEdge = async (functionPath, options = {}) => {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || `HTTP error! status: ${response.status}`);
+    const err = new Error(error.message || `HTTP error! status: ${response.status}`);
+    err.status = response.status;
+    if (error.code) err.code = error.code;
+    if (error.trialEndsAt !== undefined) err.trialEndsAt = error.trialEndsAt;
+    if (error.licensed !== undefined) err.licensed = error.licensed;
+    throw err;
   }
 
   return response.json();
@@ -72,6 +77,16 @@ export const authAPI = {
     return fetchEdge('restaurant-auth/verify');
   },
 
+  /**
+   * Submit license access code (validated server-side). Requires bearer token.
+   */
+  activateLicense: async (code) => {
+    return fetchEdge('restaurant-auth/activate-license', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  },
+
   logout: async () => {
     const result = await fetchEdge('restaurant-auth/logout', { method: 'POST' });
     localStorage.removeItem('authToken');
@@ -89,7 +104,6 @@ export const dataAPI = {
   getRecentExperiences: () => fetchEdge('restaurant-data/experiences'),
   getFlavorInsights: (period) => fetchEdge(`restaurant-data/flavors${period ? `?period=${period}` : ''}`),
   getTrafficData: () => fetchEdge('restaurant-data/traffic'),
-  getGouSuggestions: () => fetchEdge('restaurant-data/suggestions'),
   getMatchTypeBreakdown: () => fetchEdge('restaurant-data/match-types'),
   getPeakHours: () => fetchEdge('restaurant-data/peak-hours'),
 
@@ -129,7 +143,6 @@ export const dataAPI = {
       recentExperiences,
       flavorInsights,
       trafficData,
-      gouSuggestions,
       matchTypeBreakdown,
       peakHours,
     ] = await Promise.all([
@@ -138,7 +151,6 @@ export const dataAPI = {
       dataAPI.getRecentExperiences(),
       dataAPI.getFlavorInsights(),
       dataAPI.getTrafficData(),
-      dataAPI.getGouSuggestions(),
       dataAPI.getMatchTypeBreakdown(),
       dataAPI.getPeakHours(),
     ]);
@@ -149,7 +161,6 @@ export const dataAPI = {
       recentExperiences,
       flavorInsights,
       trafficData,
-      gouSuggestions,
       matchTypeBreakdown,
       peakHours,
     };
@@ -172,6 +183,7 @@ export const integrationAPI = {
     method: 'DELETE',
   }),
 
+  /** Stripe + Square + Clover aggregated flavor/revenue insights (edge: restaurant-data). */
   getStripeInsights: () => fetchEdge('restaurant-data/stripe-insights'),
 
   connectClover: (code, merchantId) => fetchEdge('restaurant-data/integrations/clover/connect', {
@@ -214,7 +226,11 @@ export const aiAPI = {
     });
 
     if (!response.ok) {
-      throw new Error(`Chat request failed: ${response.status}`);
+      const error = await response.json().catch(() => ({}));
+      const err = new Error(error.message || `Chat request failed: ${response.status}`);
+      err.status = response.status;
+      if (error.code) err.code = error.code;
+      throw err;
     }
 
     return response.body;

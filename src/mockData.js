@@ -119,30 +119,6 @@ export const trafficData = [
   { date: "Jan 20", visitors: 105 }
 ];
 
-export const gouSuggestions = [
-  {
-    id: 1,
-    type: "insight",
-    title: "Outdoor Seating Opportunity",
-    message: "40% of your Grangou matches prefer outdoor seating. Consider highlighting your patio section in your app profile!",
-    icon: "sun"
-  },
-  {
-    id: 2,
-    type: "trend",
-    title: "Rising Brunch Demand",
-    message: "Weekend brunch bookings from Grangou increased 35% this month. You might want to extend brunch hours!",
-    icon: "trending-up"
-  },
-  {
-    id: 3,
-    type: "action",
-    title: "Menu Highlight",
-    message: "Your Truffle Fries are mentioned in 87% of positive reviews. Consider making it a featured item!",
-    icon: "star"
-  }
-];
-
 export const matchTypeBreakdown = [
   { type: "1-on-1 Dates", percentage: 45, color: "#FF3B3F" },
   { type: "Group Hangouts", percentage: 28, color: "#06D6A0" },

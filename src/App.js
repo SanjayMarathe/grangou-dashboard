@@ -15,7 +15,6 @@ import {
   Search,
   RefreshCw,
   ExternalLink,
-  Sparkles,
   LogOut,
   Loader2,
   X,
@@ -356,6 +355,100 @@ const AuthPage = () => {
   );
 };
 
+const LicensePaywall = () => {
+  const { activateLicense, logout, entitlement, user } = useAuth();
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const inputClass =
+    'w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF3B3F] focus:border-transparent';
+
+  const trialLabel = entitlement?.trialEndsAt
+    ? new Date(entitlement.trialEndsAt).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+    try {
+      await activateLicense(code.trim());
+    } catch (err) {
+      setError(err.message || 'Could not activate license');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F4F4F4] flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <GrangouLogo size={64} />
+          </div>
+          <h1 className="text-2xl font-bold text-[#222222]">Trial ended</h1>
+          <p className="text-gray-500 mt-2">
+            {user?.name ? `${user.name}: ` : ''}
+            Your 7-day trial has ended
+            {trialLabel ? ` (${trialLabel})` : ''}. Enter your license access code to continue using the
+            restaurant portal.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{error}</div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-[#222222] mb-2">License access code</label>
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className={inputClass}
+              placeholder="Enter your code"
+              autoComplete="off"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full py-3 bg-[#FF3B3F] hover:bg-[#E63538] text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="animate-spin" size={20} />
+                Verifying...
+              </>
+            ) : (
+              'Unlock dashboard'
+            )}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={logout}
+            className="text-sm text-gray-500 hover:text-[#222222] underline"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Header Component
 const Navbar = ({ onRefresh, isRefreshing, onOpenIntegrations, onNavigate }) => {
   const { logout } = useAuth();
@@ -480,45 +573,6 @@ const ImpactMetrics = ({ impactMetrics }) => {
           </p>
         </div>
       ))}
-    </div>
-  );
-};
-
-// Gou Says AI Suggestion Component
-const GouSaysCard = ({ gouSuggestions }) => {
-  const [currentSuggestion, setCurrentSuggestion] = useState(0);
-
-  if (!gouSuggestions || gouSuggestions.length === 0) return null;
-
-  const suggestion = gouSuggestions[currentSuggestion];
-
-  return (
-    <div className="bg-gradient-to-r from-[#FF3B3F] to-[#FF6B6F] rounded-lg p-6 mb-6 shadow-lg">
-      <div className="flex items-start gap-4">
-        <div className="p-3 bg-white/20 rounded-lg text-white">
-          <Sparkles size={24} />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <h3 className="font-bold text-white text-lg">Gou Says...</h3>
-            <span className="px-2 py-0.5 bg-white/20 text-white text-xs font-semibold rounded-full">
-              AI Insight
-            </span>
-          </div>
-          <p className="text-white/90 mb-4 text-base">{suggestion.message}</p>
-          <div className="flex items-center gap-3">
-            <button className="px-5 py-2.5 bg-white text-[#FF3B3F] text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors shadow-sm">
-              Take Action
-            </button>
-            <button
-              onClick={() => setCurrentSuggestion((prev) => (prev + 1) % gouSuggestions.length)}
-              className="px-5 py-2.5 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold rounded-lg transition-colors"
-            >
-              Next Tip
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
@@ -1326,22 +1380,29 @@ const OrderLogging = ({ onBack }) => {
 };
 
 // Flavor Insights Component (with real data + time period toggle)
-const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected, cloverConnected }) => {
+const FlavorInsights = ({
+  flavorInsights: initialFlavors,
+  stripeConnected,
+  squareConnected,
+  cloverConnected,
+}) => {
   const [period, setPeriod] = useState('all');
   const [flavors, setFlavors] = useState(initialFlavors);
-  const [stripeData, setStripeData] = useState(null);
+  const [paymentInsights, setPaymentInsights] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const paymentIntegrationConnected = stripeConnected || squareConnected || cloverConnected;
 
   useEffect(() => {
     setFlavors(initialFlavors);
   }, [initialFlavors]);
 
   useEffect(() => {
-    if (!stripeConnected) return;
+    if (!paymentIntegrationConnected) return;
     integrationAPI.getStripeInsights()
-      .then(data => setStripeData(data))
-      .catch(err => console.error('Failed to load stripe insights:', err));
-  }, [stripeConnected]);
+      .then(data => setPaymentInsights(data))
+      .catch(err => console.error('Failed to load payment insights:', err));
+  }, [paymentIntegrationConnected]);
 
   const handlePeriodChange = async (newPeriod) => {
     setPeriod(newPeriod);
@@ -1356,16 +1417,15 @@ const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected, clove
     }
   };
 
-  // Stripe takes priority; Clover falls back to local orders
-  const useStripe = stripeConnected && stripeData && stripeData.length > 0;
-  const displayData = useStripe ? stripeData : flavors;
+  // Aggregated Stripe / Square / Clover insights take priority; else Grangou guest orders
+  const usePaymentData =
+    paymentIntegrationConnected && paymentInsights && paymentInsights.length > 0;
+  const displayData = usePaymentData ? paymentInsights : flavors;
   const isEmpty = !displayData || displayData.length === 0;
 
-  const emptyMessage = stripeConnected
-    ? 'No succeeded charges found in your Stripe account'
-    : cloverConnected
-      ? 'Connect Stripe to see revenue insights, or log guest orders for order-based insights'
-      : 'Set up your menu and log guest orders to see insights';
+  const emptyMessage = paymentIntegrationConnected
+    ? 'No payment data found from your connected integrations yet'
+    : 'Connect Stripe, Square, or Clover for revenue insights, or set up your menu and log guest orders';
 
   if (isEmpty) {
     return (
@@ -1392,15 +1452,31 @@ const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected, clove
             Gou's Flavor Insights
           </h2>
           <p className="text-sm text-gray-500">
-            {useStripe ? 'Top revenue from your Stripe charges' : 'What your Grangou guests love most'}
+            {usePaymentData
+              ? 'Top revenue from connected payments (Stripe, Square, Clover)'
+              : 'What your Grangou guests love most'}
           </p>
         </div>
-        {useStripe && (
-          <img src="/stripe.png" alt="Stripe" className="h-5 object-contain opacity-60" />
+        {usePaymentData && (
+          <div className="flex items-center gap-1.5 opacity-70">
+            {stripeConnected && (
+              <img src="/stripe.png" alt="" className="h-5 object-contain" title="Stripe" />
+            )}
+            {squareConnected && (
+              <span className="text-[10px] font-bold text-gray-600 border border-gray-300 rounded px-1 py-0.5" title="Square">
+                SQ
+              </span>
+            )}
+            {cloverConnected && (
+              <span className="text-[10px] font-bold text-gray-600 border border-gray-300 rounded px-1 py-0.5" title="Clover">
+                CL
+              </span>
+            )}
+          </div>
         )}
       </div>
-      {/* Period Toggle — only for non-Stripe */}
-      {!useStripe && (
+      {/* Period Toggle — only when not using aggregated payment insights */}
+      {!usePaymentData && (
         <div className="flex gap-1 mb-5 bg-[#F4F4F4] rounded-lg p-1">
           {[
             { key: 'week', label: 'This Week' },
@@ -1437,7 +1513,7 @@ const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected, clove
                   )}
                 </div>
                 <span className="text-sm text-gray-500">
-                  {useStripe ? `$${item.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `${item.orders} orders`}
+                  {usePaymentData ? `$${item.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `${item.orders} orders`}
                 </span>
               </div>
               <div className="h-3 bg-[#F4F4F4] rounded-full overflow-hidden">
@@ -1447,8 +1523,12 @@ const FlavorInsights = ({ flavorInsights: initialFlavors, stripeConnected, clove
                 />
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                {item.percentage}% of {useStripe ? 'revenue' : 'orders'}
-                {useStripe && item.count && <span className="ml-2">· {item.count} charge{item.count !== 1 ? 's' : ''}</span>}
+                {item.percentage}% of {usePaymentData ? 'revenue' : 'orders'}
+                {usePaymentData && item.count != null && (
+                  <span className="ml-2">
+                    · {item.count} {item.count === 1 ? 'line' : 'lines'}
+                  </span>
+                )}
               </p>
             </div>
           ))}
@@ -1520,6 +1600,7 @@ const TrafficChart = ({ trafficData }) => {
               avg: {avgVisitors}
             </span>
           </div>
+
 
           {/* Bars */}
           <div className="h-[200px] flex items-end gap-2 relative">
@@ -2141,6 +2222,7 @@ const IntegrationsPage = ({
 
 // Chatbot Panel Component (floating, restaurant management copilot)
 const ChatbotPanel = ({ isOpen, onClose }) => {
+  const { refreshSession } = useAuth();
   const [messages, setMessages] = useState([
     { role: 'assistant', content: "Hi! I'm Gou, your restaurant management copilot. I can help with Grangou guest insights, peak hours, ratings, and more. Connect Stripe, Clover, or Square in Integrations to unlock financial and POS data!" }
   ]);
@@ -2266,9 +2348,22 @@ const ChatbotPanel = ({ isOpen, onClose }) => {
         }
       }
     } catch (err) {
+      if (err.code === 'PAYWALL') {
+        try {
+          await refreshSession();
+        } catch {
+          /* ignore */
+        }
+      }
       setMessages(prev => {
         const updated = [...prev];
-        updated[updated.length - 1] = { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' };
+        updated[updated.length - 1] = {
+          role: 'assistant',
+          content:
+            err.code === 'PAYWALL'
+              ? 'Your trial has ended. Close this panel and enter your license access code on the paywall to continue.'
+              : 'Sorry, I encountered an error. Please try again.',
+        };
         return updated;
       });
     } finally {
@@ -2460,8 +2555,9 @@ const QuickActions = ({ onExportReport, onOpenMenu, onOpenOrders }) => (
   </div>
 );
 
-// Dashboard Component (main content when authenticated)
+// Dashboard Component (main content when authenticated and entitled)
 const Dashboard = () => {
+  const { refreshSession } = useAuth();
   const [dashboardData, setDashboardData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -2481,6 +2577,13 @@ const Dashboard = () => {
       setDashboardData(data);
       setError(null);
     } catch (err) {
+      if (err.code === 'PAYWALL') {
+        try {
+          await refreshSession();
+        } catch {
+          /* session refresh failed */
+        }
+      }
       setError(err.message);
       console.error('Failed to fetch dashboard data:', err);
     }
@@ -2496,6 +2599,13 @@ const Dashboard = () => {
       setSquareConnected(status.square?.connected || false);
       setSquareMerchantId(status.square?.square_merchant_id || null);
     } catch (err) {
+      if (err.code === 'PAYWALL') {
+        try {
+          await refreshSession();
+        } catch {
+          /* ignore */
+        }
+      }
       console.error('Failed to fetch integration status:', err);
     }
   };
@@ -2585,7 +2695,6 @@ const Dashboard = () => {
     recentExperiences,
     flavorInsights,
     trafficData,
-    gouSuggestions,
     matchTypeBreakdown,
   } = dashboardData || {};
 
@@ -2637,7 +2746,6 @@ const Dashboard = () => {
           <main className="p-8 pb-12">
             <Header />
             <ImpactMetrics impactMetrics={impactMetrics} />
-            <GouSaysCard gouSuggestions={gouSuggestions} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 <RecentExperiences recentExperiences={recentExperiences} />
@@ -2645,7 +2753,12 @@ const Dashboard = () => {
                 <MatchTypeBreakdown matchTypeBreakdown={matchTypeBreakdown} />
               </div>
               <div className="space-y-6">
-                <FlavorInsights flavorInsights={flavorInsights} stripeConnected={stripeConnected} cloverConnected={cloverConnected} />
+                <FlavorInsights
+                  flavorInsights={flavorInsights}
+                  stripeConnected={stripeConnected}
+                  squareConnected={squareConnected}
+                  cloverConnected={cloverConnected}
+                />
                 <QuickActions
                   onExportReport={handleExportReport}
                   onOpenMenu={() => setCurrentPage('menu')}
@@ -2664,13 +2777,21 @@ const Dashboard = () => {
 
 // Main App Component with Auth
 const AppContent = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, canUseDashboard } = useAuth();
 
   if (isLoading) {
     return <LoadingSpinner />;
   }
 
-  return isAuthenticated ? <Dashboard /> : <AuthPage />;
+  if (!isAuthenticated) {
+    return <AuthPage />;
+  }
+
+  if (!canUseDashboard) {
+    return <LicensePaywall />;
+  }
+
+  return <Dashboard />;
 };
 
 function App() {

@@ -24,10 +24,21 @@ function decodeToken(token: string): { userId: number; email: string } | null {
   }
 }
 
+function canUseDashboard(row: {
+  trial_ends_at: string | null;
+  license_activated_at: string | null;
+}): boolean {
+  if (row.license_activated_at) return true;
+  if (!row.trial_ends_at) return false;
+  return Date.now() < new Date(row.trial_ends_at).getTime();
+}
+
 async function authenticate(req: Request): Promise<{
   id: number;
   name: string;
   email: string;
+  trial_ends_at: string | null;
+  license_activated_at: string | null;
   stripe_access_token?: string;
   stripe_connected?: boolean;
   clover_access_token?: string;
@@ -44,7 +55,9 @@ async function authenticate(req: Request): Promise<{
 
   const { data } = await b2b
     .from("restaraunts")
-    .select("id, name, email, stripe_access_token, stripe_connected, clover_access_token, clover_merchant_id, clover_connected, square_access_token, square_connected")
+    .select(
+      "id, name, email, trial_ends_at, license_activated_at, stripe_access_token, stripe_connected, clover_access_token, clover_merchant_id, clover_connected, square_access_token, square_connected",
+    )
     .eq("id", payload.userId)
     .single();
 
@@ -414,6 +427,21 @@ Deno.serve(async (req) => {
       status: 401,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+
+  if (!canUseDashboard(user)) {
+    return new Response(
+      JSON.stringify({
+        code: "PAYWALL",
+        message: "Your trial has ended. Enter a valid license access code to continue.",
+        trialEndsAt: user.trial_ends_at,
+        licensed: false,
+      }),
+      {
+        status: 402,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   }
 
   const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY")!;

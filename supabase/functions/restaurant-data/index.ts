@@ -31,7 +31,22 @@ function decodeToken(token: string): { userId: number; email: string } | null {
   }
 }
 
-async function authenticate(req: Request): Promise<{ id: number; name: string; email: string; created_at: string } | null> {
+type AuthRestaurant = {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+  trial_ends_at: string | null;
+  license_activated_at: string | null;
+};
+
+function canUseDashboard(row: Pick<AuthRestaurant, "trial_ends_at" | "license_activated_at">): boolean {
+  if (row.license_activated_at) return true;
+  if (!row.trial_ends_at) return false;
+  return Date.now() < new Date(row.trial_ends_at).getTime();
+}
+
+async function authenticate(req: Request): Promise<AuthRestaurant | null> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
 
@@ -40,7 +55,7 @@ async function authenticate(req: Request): Promise<{ id: number; name: string; e
 
   const { data } = await b2b
     .from("restaraunts")
-    .select("id, name, email, created_at")
+    .select("id, name, email, created_at, trial_ends_at, license_activated_at")
     .eq("id", payload.userId)
     .single();
 
@@ -638,51 +653,251 @@ async function handlePeakHours(restaurantName: string) {
 }
 
 // ============================================
-// STRIPE INSIGHTS HANDLER
+// PAYMENT INSIGHTS (Stripe + Square + Clover)
+// Aggregates line-item / charge data from all connected integrations.
 // ============================================
 
-async function handleStripeInsights(restaurantId: number) {
-  const { data: restaurant } = await b2b
-    .from("restaraunts")
-    .select("stripe_access_token, stripe_connected")
-    .eq("id", restaurantId)
-    .single();
+const SQUARE_API_VERSION = "2024-01-18";
 
-  if (!restaurant?.stripe_connected || !restaurant?.stripe_access_token) {
-    return [];
-  }
+type InsightSourceRow = { name: string; revenue: number; count: number; source: string };
 
+async function fetchStripeInsightRows(accessToken: string): Promise<InsightSourceRow[]> {
   const response = await fetch("https://api.stripe.com/v1/charges?limit=100", {
-    headers: { "Authorization": `Bearer ${restaurant.stripe_access_token}` },
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
   const data = await response.json();
+  if (!response.ok || !data.data?.length) return [];
 
-  if (!data.data || data.data.length === 0) return [];
-
-  // Group succeeded charges by description
   const itemMap: Record<string, { revenue: number; count: number }> = {};
-  let totalRevenue = 0;
 
   for (const charge of data.data) {
     if (charge.status !== "succeeded") continue;
     const key = (charge.description || "Other").trim();
     if (!itemMap[key]) itemMap[key] = { revenue: 0, count: 0 };
-    itemMap[key].revenue += charge.amount;
+    itemMap[key].revenue += charge.amount / 100;
     itemMap[key].count += 1;
-    totalRevenue += charge.amount;
   }
 
-  if (totalRevenue === 0) return [];
+  return Object.entries(itemMap).map(([name, v]) => ({
+    name,
+    revenue: v.revenue,
+    count: v.count,
+    source: "stripe",
+  }));
+}
 
-  return Object.entries(itemMap)
-    .sort((a, b) => b[1].revenue - a[1].revenue)
+function squareHeaders(accessToken: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Square-Version": SQUARE_API_VERSION,
+    "Content-Type": "application/json",
+  };
+}
+
+/** Square: completed orders with line_items; falls back to list payments if needed. */
+async function fetchSquareInsightRows(accessToken: string): Promise<InsightSourceRow[]> {
+  const headers = squareHeaders(accessToken);
+
+  const locRes = await fetch("https://connect.squareup.com/v2/locations", { headers });
+  const locJson = await locRes.json();
+  if (!locRes.ok || !locJson.locations?.length) {
+    return fetchSquarePaymentsInsightRows(headers);
+  }
+
+  const locationIds = (locJson.locations as { id: string }[]).map((l) => l.id);
+
+  const searchRes = await fetch("https://connect.squareup.com/v2/orders/search", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      location_ids: locationIds,
+      query: {
+        filter: {
+          state_filter: {
+            states: ["COMPLETED"],
+          },
+        },
+        sort: {
+          sort_field: "CLOSED_AT",
+          sort_order: "DESC",
+        },
+      },
+      limit: 100,
+    }),
+  });
+  const searchJson = await searchRes.json();
+  const orders = (searchRes.ok && searchJson.orders) ? searchJson.orders as Record<string, unknown>[] : [];
+
+  const fromOrders: InsightSourceRow[] = [];
+  const itemMap: Record<string, { revenue: number; count: number }> = {};
+
+  for (const order of orders) {
+    const lineItems = (order.line_items || order.lineItems) as Record<string, unknown>[] | undefined;
+    if (!lineItems?.length) continue;
+    for (const li of lineItems) {
+      const name = String(li.name || "Other").trim();
+      const money = (li.total_money || li.totalMoney) as { amount?: number } | undefined;
+      const gross = (li.gross_sales_money || li.grossSalesMoney) as { amount?: number } | undefined;
+      const cents = money?.amount ?? gross?.amount ?? 0;
+      if (cents <= 0) continue;
+      const qtyRaw = li.quantity ?? "1";
+      const qty = parseFloat(String(qtyRaw)) || 1;
+      if (!itemMap[name]) itemMap[name] = { revenue: 0, count: 0 };
+      itemMap[name].revenue += cents / 100;
+      itemMap[name].count += qty;
+    }
+  }
+
+  for (const [name, v] of Object.entries(itemMap)) {
+    fromOrders.push({ name, revenue: v.revenue, count: v.count, source: "square" });
+  }
+
+  if (fromOrders.length > 0) return fromOrders;
+  return fetchSquarePaymentsInsightRows(headers);
+}
+
+async function fetchSquarePaymentsInsightRows(
+  headers: Record<string, string>,
+): Promise<InsightSourceRow[]> {
+  const payRes = await fetch("https://connect.squareup.com/v2/payments?limit=100", { headers });
+  const payJson = await payRes.json();
+  if (!payRes.ok || !payJson.payments?.length) return [];
+
+  const itemMap: Record<string, { revenue: number; count: number }> = {};
+  for (const p of payJson.payments as Record<string, unknown>[]) {
+    const status = String(p.status || "");
+    if (status !== "COMPLETED" && status !== "APPROVED" && status !== "CAPTURED") continue;
+    const name = String(p.note || p.statement_description_identifier || "Square payment").trim();
+    const amountMoney = p.amount_money as { amount?: number } | undefined;
+    const cents = amountMoney?.amount ?? 0;
+    if (cents <= 0) continue;
+    if (!itemMap[name]) itemMap[name] = { revenue: 0, count: 0 };
+    itemMap[name].revenue += cents / 100;
+    itemMap[name].count += 1;
+  }
+
+  return Object.entries(itemMap).map(([name, v]) => ({
+    name,
+    revenue: v.revenue,
+    count: v.count,
+    source: "square",
+  }));
+}
+
+/** Clover: orders with line items (unitQty scaled ×1000 per Clover API). */
+async function fetchCloverInsightRows(
+  accessToken: string,
+  merchantId: string,
+): Promise<InsightSourceRow[]> {
+  const url =
+    `https://api.clover.com/v3/merchants/${merchantId}/orders?limit=100&expand=lineItems`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = await res.json();
+  if (!res.ok) return [];
+
+  const elements = (data.elements || []) as Record<string, unknown>[];
+  const itemMap: Record<string, { revenue: number; count: number }> = {};
+
+  for (const order of elements) {
+    const lineItemsObj = order.lineItems as { elements?: Record<string, unknown>[] } | undefined;
+    const lines = lineItemsObj?.elements || [];
+    for (const li of lines) {
+      const name = String(li.name || "Other").trim();
+      const price = typeof li.price === "number" ? li.price : parseInt(String(li.price || 0), 10);
+      const unitQty = typeof li.unitQty === "number" ? li.unitQty : 1000;
+      const lineCents = Math.round((price * unitQty) / 1000);
+      if (lineCents <= 0) continue;
+      if (!itemMap[name]) itemMap[name] = { revenue: 0, count: 0 };
+      itemMap[name].revenue += lineCents / 100;
+      itemMap[name].count += unitQty / 1000;
+    }
+  }
+
+  return Object.entries(itemMap).map(([name, v]) => ({
+    name,
+    revenue: v.revenue,
+    count: Math.round(v.count * 1000) / 1000,
+    source: "clover",
+  }));
+}
+
+function mergeAndRankPaymentInsights(rows: InsightSourceRow[]): Array<{
+  item: string;
+  revenue: number;
+  count: number;
+  percentage: number;
+  sources?: string[];
+}> {
+  const map = new Map<string, { item: string; revenue: number; count: number; sources: Set<string> }>();
+
+  for (const r of rows) {
+    const raw = (r.name || "Other").trim();
+    const key = raw.toLowerCase() || "other";
+    const ex = map.get(key);
+    if (ex) {
+      ex.revenue += r.revenue;
+      ex.count += r.count;
+      ex.sources.add(r.source);
+    } else {
+      map.set(key, {
+        item: raw || "Other",
+        revenue: r.revenue,
+        count: r.count,
+        sources: new Set([r.source]),
+      });
+    }
+  }
+
+  const totalRevenue = [...map.values()].reduce((s, x) => s + x.revenue, 0);
+  if (totalRevenue <= 0) return [];
+
+  return [...map.values()]
+    .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5)
-    .map(([name, stats]) => ({
-      item: name,
-      revenue: stats.revenue / 100,
-      count: stats.count,
-      percentage: Math.round((stats.revenue / totalRevenue) * 100),
+    .map((x) => ({
+      item: x.item,
+      revenue: Math.round(x.revenue * 100) / 100,
+      count: Math.round(x.count * 100) / 100,
+      percentage: Math.round((x.revenue / totalRevenue) * 100),
+      sources: [...x.sources].sort(),
     }));
+}
+
+/** GET stripe-insights — combines Stripe charges, Square orders/payments, Clover order line items. */
+async function handlePaymentInsights(restaurantId: number) {
+  const { data: r } = await b2b
+    .from("restaraunts")
+    .select(
+      "stripe_access_token, stripe_connected, square_access_token, square_connected, square_merchant_id, clover_access_token, clover_connected, clover_merchant_id",
+    )
+    .eq("id", restaurantId)
+    .single();
+
+  if (!r) return [];
+
+  const tasks: Promise<InsightSourceRow[]>[] = [];
+
+  if (r.stripe_connected && r.stripe_access_token) {
+    tasks.push(fetchStripeInsightRows(r.stripe_access_token));
+  }
+  if (r.square_connected && r.square_access_token && r.square_merchant_id) {
+    tasks.push(fetchSquareInsightRows(r.square_access_token));
+  }
+  if (r.clover_connected && r.clover_access_token && r.clover_merchant_id) {
+    tasks.push(fetchCloverInsightRows(r.clover_access_token, r.clover_merchant_id));
+  }
+
+  if (tasks.length === 0) return [];
+
+  const settled = await Promise.allSettled(tasks);
+  const rows: InsightSourceRow[] = [];
+  for (const s of settled) {
+    if (s.status === "fulfilled" && s.value.length) rows.push(...s.value);
+  }
+
+  if (rows.length === 0) return [];
+
+  return mergeAndRankPaymentInsights(rows);
 }
 
 // ============================================
@@ -975,6 +1190,18 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Unauthorized", message: "Invalid or missing token" }, 401);
   }
 
+  if (!canUseDashboard(user)) {
+    return jsonResponse(
+      {
+        code: "PAYWALL",
+        message: "Your trial has ended. Enter a valid license access code to continue.",
+        trialEndsAt: user.trial_ends_at,
+        licensed: false,
+      },
+      402,
+    );
+  }
+
   const restaurantName = user.name;
   const restaurantId = user.id;
   const url = new URL(req.url);
@@ -1024,7 +1251,7 @@ Deno.serve(async (req) => {
         case "integrations":
           return jsonResponse(await handleGetIntegrations(restaurantId));
         case "stripe-insights":
-          return jsonResponse(await handleStripeInsights(restaurantId));
+          return jsonResponse(await handlePaymentInsights(restaurantId));
         case "profile":
           return jsonResponse(await handleProfile(restaurantName, user.created_at));
         case "metrics":
